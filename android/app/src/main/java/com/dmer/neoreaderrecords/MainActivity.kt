@@ -146,6 +146,7 @@ class MainActivity : ComponentActivity() {
     private var lastWeReadCoverDebug: String = ""
     private var lastWeReadWallpaperDebug: String = ""
     private var lastHanvonReadingProbeReport: String = ""
+    private var currentDevicePresetOptions: List<BooxDevicePreset> = BooxDevicePresets.boox
     private var selectedFontDirUri: String? = null
 
     private val pickFontTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -501,6 +502,7 @@ class MainActivity : ComponentActivity() {
         ).joinToString(" ").uppercase(Locale.ROOT)
 
         return when {
+            raw.contains("HANVON") || raw.contains("汉王") -> detectHanvonDevicePresetFromRaw(raw)
             raw.contains("PALMA") -> "PALMA"
             raw.contains("POKE") && raw.contains("7") && raw.contains("PRO") -> "POKE7_PRO"
             raw.contains("POKE") && raw.contains("7") -> "POKE7"
@@ -525,13 +527,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun detectHanvonDevicePresetFromRaw(raw: String): String {
+        return when {
+            raw.contains("CLEAR") && raw.contains("6") -> "HANVON_CLEAR6"
+            raw.contains("CLEAR") && raw.contains("7") -> "HANVON_CLEAR7"
+            raw.contains("N10") && raw.contains("MAX") -> "HANVON_N10_MAX"
+            raw.contains("N10") && raw.contains("MINI") -> "HANVON_N10_MINI"
+            raw.contains("N10") && raw.contains("PRO") -> "HANVON_N10_PRO"
+            raw.contains("N10") -> "HANVON_N10"
+            else -> "HANVON_CLEAR7"
+        }
+    }
+
     private fun detectBooxDevicePreset(): String {
         return detectBooxDevicePresetOrNull() ?: BooxDevicePresets.DEFAULT_KEY
     }
 
     private fun booxPresetKeyByRadioId(id: Int): String {
         if (id == 1301) return BooxDevicePresets.CUSTOM_KEY
-        return BooxDevicePresets.all.getOrNull(id - 1302)?.key ?: BooxDevicePresets.DEFAULT_KEY
+        return currentDevicePresetOptions.getOrNull(id - 1302)?.key ?: BooxDevicePresets.DEFAULT_KEY
     }
 
     private fun wallpaperSizeDisplayText(settings: Settings): String {
@@ -1030,18 +1044,20 @@ class MainActivity : ComponentActivity() {
 
         val matchedBooxPreset = detectBooxDevicePresetOrNull()
         val detectedBooxPreset = matchedBooxPreset ?: BooxDevicePresets.DEFAULT_KEY
-        val booxDevicePresetOptions = listOf(1301 to "自定义分辨率\n手动输入宽度和高度") + BooxDevicePresets.all.mapIndexed { index, preset ->
+        val visibleDevicePresets = BooxDevicePresets.visibleForCurrentDevice()
+        currentDevicePresetOptions = visibleDevicePresets
+        val booxDevicePresetOptions = listOf(1301 to "自定义分辨率\n手动输入宽度和高度") + visibleDevicePresets.mapIndexed { index, preset ->
             val matchMark = if (matchedBooxPreset != null && preset.key == matchedBooxPreset) " [本机匹配]" else ""
             (1302 + index) to "${preset.label}$matchMark\n${preset.inchText} ${preset.heightPx}x${preset.widthPx}"
         }
-        val booxDevicePresetNames = listOf(BooxDevicePresets.CUSTOM_KEY) + BooxDevicePresets.all.map { it.key }
+        val booxDevicePresetNames = listOf(BooxDevicePresets.CUSTOM_KEY) + visibleDevicePresets.map { it.key }
         val hasManualBooxPreset = prefs.getBoolean("boox_device_preset_user_set", false)
         val defaultBooxDevicePreset = if (hasManualBooxPreset && prefs.contains("boox_device_preset")) {
             prefs.getString("boox_device_preset", BooxDevicePresets.DEFAULT_KEY) ?: BooxDevicePresets.DEFAULT_KEY
         } else {
             detectedBooxPreset
         }
-        appendUiDebug("booxDevicePreset default=$defaultBooxDevicePreset matched=${matchedBooxPreset ?: "none"} hasSaved=${prefs.contains("boox_device_preset")} userSet=$hasManualBooxPreset device=${deviceIdentityText()}")
+        appendUiDebug("booxDevicePreset default=$defaultBooxDevicePreset matched=${matchedBooxPreset ?: "none"} visiblePresets=${visibleDevicePresets.size} hanvon=${DevicePlatform.isHanvonDevice()} hasSaved=${prefs.contains("boox_device_preset")} userSet=$hasManualBooxPreset device=${deviceIdentityText()}")
         booxDevicePresetGroup = makeRadioGroup(
             booxDevicePresetOptions,
             selectedId(
