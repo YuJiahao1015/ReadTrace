@@ -1,6 +1,5 @@
 package com.dmer.neoreaderrecords
 
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -44,7 +43,6 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatWriter
 import com.google.zxing.common.BitMatrix
 import java.io.File
-import java.io.FileOutputStream
 import java.io.FileWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -1670,9 +1668,14 @@ class MainActivity : ComponentActivity() {
         previewBitmap = bmp
         previewPresetText = wallpaperSizeDisplayText(settings)
         val saved = saveBitmapToPictures(bmp)
-        lastSavedPath = saved
-        statusText.text = "已生成并覆盖文件\n$result\n路径: $saved"
-        changeStateText.text = "状态: 已生成并保存｜尺寸: $previewPresetText"
+        if (saved.ok) {
+            lastSavedPath = saved.path
+            statusText.text = "已生成并覆盖文件\n$result\n路径: ${saved.path}${if (saved.fallback) "\n提示：公共图片目录保存失败，已保存到 App 目录。" else ""}"
+            changeStateText.text = "状态: 已生成并保存｜尺寸: $previewPresetText"
+        } else {
+            statusText.text = "壁纸生成成功，但保存失败\n$result\n错误: ${saved.detail}"
+            changeStateText.text = "状态: 保存失败｜尺寸: $previewPresetText"
+        }
         refreshPreview()
         showPreviewPage()
         writeDebugLog("generated_saved")
@@ -1901,7 +1904,13 @@ class MainActivity : ComponentActivity() {
             wereadStatusText.text = "$sourceLabel：正在生成${periodLabel}预览..."
         }
         Thread {
-            val preview = buildSourcePreviewForWallpaperMode(settings)
+            var buildError = ""
+            val preview = runCatching {
+                buildSourcePreviewForWallpaperMode(settings)
+            }.getOrElse {
+                buildError = "${it.javaClass.simpleName}: ${it.message ?: "生成失败"}"
+                null
+            }
             runOnUiThread {
                 isTestingWeRead = false
                 if (preview != null) {
@@ -1914,7 +1923,7 @@ class MainActivity : ComponentActivity() {
                     showPreviewPage()
                 } else {
                     changeStateText.text = "状态: ${sourceLabel}预览失败"
-                    lastWeReadWallpaperDebug = "ok=false, period=$periodLabel"
+                    lastWeReadWallpaperDebug = "ok=false, period=$periodLabel, error=${buildError.ifBlank { "<none>" }}"
                 }
                 if (::wereadStatusText.isInitialized) {
                     wereadStatusText.text = "${wereadStatusText.text}\n账单预览：${lastWeReadWallpaperDebug.take(180)}"
@@ -1938,22 +1947,34 @@ class MainActivity : ComponentActivity() {
             wereadStatusText.text = "$sourceLabel：正在生成并保存${periodLabel}壁纸..."
         }
         Thread {
-            val preview = buildSourcePreviewForWallpaperMode(settings)
+            var buildError = ""
+            val preview = runCatching {
+                buildSourcePreviewForWallpaperMode(settings)
+            }.getOrElse {
+                buildError = "${it.javaClass.simpleName}: ${it.message ?: "生成失败"}"
+                null
+            }
             runOnUiThread {
                 isTestingWeRead = false
                 if (preview != null) {
                     val saved = saveBitmapToPictures(preview.bitmap)
                     previewBitmap = preview.bitmap
-                    lastSavedPath = saved
+                    if (saved.ok) lastSavedPath = saved.path
                     previewPresetText = wallpaperSizeDisplayText(readSettingsFromUi())
-                    statusText.text = "${sourceLabel}壁纸已生成并覆盖文件\n${preview.summary}\n路径: $saved"
-                    changeStateText.text = "状态: ${sourceLabel}壁纸已生成并保存｜尺寸: $previewPresetText"
-                    lastWeReadWallpaperDebug = "ok=true, period=$periodLabel, saved=$saved, summary=${preview.summary}"
+                    if (saved.ok) {
+                        statusText.text = "${sourceLabel}壁纸已生成并覆盖文件\n${preview.summary}\n路径: ${saved.path}${if (saved.fallback) "\n提示：公共图片目录保存失败，已保存到 App 目录。" else ""}"
+                        changeStateText.text = "状态: ${sourceLabel}壁纸已生成并保存｜尺寸: $previewPresetText"
+                        lastWeReadWallpaperDebug = "ok=true, period=$periodLabel, saved=${saved.path}, fallback=${saved.fallback}, detail=${saved.detail}, summary=${preview.summary}"
+                    } else {
+                        statusText.text = "${sourceLabel}壁纸生成成功，但保存失败\n${preview.summary}\n错误: ${saved.detail}"
+                        changeStateText.text = "状态: ${sourceLabel}保存失败｜尺寸: $previewPresetText"
+                        lastWeReadWallpaperDebug = "ok=false, period=$periodLabel, saveError=${saved.detail}, summary=${preview.summary}"
+                    }
                     refreshPreview()
                     showPreviewPage()
                 } else {
                     changeStateText.text = "状态: ${sourceLabel}生成失败"
-                    lastWeReadWallpaperDebug = "ok=false, period=$periodLabel, saved=<none>"
+                    lastWeReadWallpaperDebug = "ok=false, period=$periodLabel, saved=<none>, error=${buildError.ifBlank { "<none>" }}"
                 }
                 if (::wereadStatusText.isInitialized) {
                     wereadStatusText.text = "${wereadStatusText.text}\n账单生成：${lastWeReadWallpaperDebug.take(180)}"
@@ -2677,19 +2698,10 @@ class MainActivity : ComponentActivity() {
         return result.distinct()
     }
 
-    private fun saveBitmapToPictures(bitmap: Bitmap): String {
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "NeoReader")
-        if (!dir.exists()) dir.mkdirs()
-        val file = File(dir, "neoreader_wallpaper.png")
-        FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
-        runCatching {
-            android.media.MediaScannerConnection.scanFile(
-                this,
-                arrayOf(file.absolutePath),
-                arrayOf("image/png")
-            ) { _, _ -> }
-        }
-        return file.absolutePath
+    private fun saveBitmapToPictures(bitmap: Bitmap): WallpaperFileStore.SaveResult {
+        val result = WallpaperFileStore.save(this, bitmap)
+        appendUiDebug("save wallpaper ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
+        return result
     }
 
     private fun dumpTextTree(view: View, maxItems: Int = 80): String {

@@ -3163,19 +3163,9 @@ object AutoWallpaperGenerator {
     }
 
     private fun saveBitmap(context: android.content.Context, bitmap: Bitmap): String {
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "NeoReader")
-        if (!dir.exists()) dir.mkdirs()
-        val file = File(dir, "neoreader_wallpaper.png")
-        FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
-        runCatching {
-            android.media.MediaScannerConnection.scanFile(
-                context,
-                arrayOf(file.absolutePath),
-                arrayOf("image/png")
-            ) { path, uri ->
-                AutoRefreshLog.i(context, "MediaScanner scanned updated image: uri=$uri")
-            }
-        }
-        return file.absolutePath
+        val result = WallpaperFileStore.save(context, bitmap)
+        AutoRefreshLog.i(context, "Wallpaper save result ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
+        if (!result.ok) error(result.detail)
+        return result.path
     }
 }
