@@ -145,6 +145,7 @@ class MainActivity : ComponentActivity() {
     private var lastWeReadStatsDebug: String = ""
     private var lastWeReadCoverDebug: String = ""
     private var lastWeReadWallpaperDebug: String = ""
+    private var lastHanvonReadingProbeReport: String = ""
     private var selectedFontDirUri: String? = null
 
     private val pickFontTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -1313,6 +1314,13 @@ class MainActivity : ComponentActivity() {
         addHint("说明：连接和最近封面会调用 /shelf/sync；统计壁纸会调用 /readdata/detail；封面会缓存到 App 私有目录。选择“数据来源=微信读书”后，手动预览/生成会立即联网；自动模式下不在熄屏时联网，而是在解锁后预热刷新，网络未恢复会短间隔重试，成功后覆盖保存到 Pictures/NeoReader/neoreader_wallpaper.png。Key 只保存在本机 App 配置中，日志只记录脱敏后的 Key。")
         renderWeReadState(WeReadClient.cachedState(this))
 
+        addSectionTitle("本地阅读器探测", "用于确认汉王、KOReader 等非文石阅读数据位置")
+        root.addView(Button(this).apply {
+            text = "探测汉王阅读数据"
+            setOnClickListener { runHanvonReadingProbe() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
+        addHint("说明：只做只读探测，不接入统计。会扫描可见 Provider 和少量公共目录 SQLite，并写入调试日志；完成后可点击“导出诊断包”发回排查。")
+
         addSectionTitle("版本与更新", "GitHub Release 分发与更新检查")
         updateStatusText = TextView(this).apply {
             textSize = 13f
@@ -2157,6 +2165,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun runHanvonReadingProbe() {
+        if (::statusText.isInitialized) {
+            statusText.text = "正在探测汉王阅读数据..."
+        }
+        if (::changeStateText.isInitialized) {
+            changeStateText.text = "状态: 正在探测汉王阅读数据"
+        }
+        AutoRefreshLog.i(this, "Hanvon reading probe requested device=${DevicePlatform.identityText()}")
+        Thread {
+            val result = runCatching { HanvonReadingProbe.run(applicationContext) }
+            runOnUiThread {
+                result.onSuccess { probe ->
+                    lastHanvonReadingProbeReport = probe.report
+                    appendUiDebug(
+                        "hanvon reading probe providers=${probe.providerCount} sqliteCandidates=${probe.sqliteCandidateCount} readableSqlite=${probe.readableSqliteCount}"
+                    )
+                    val summary = "汉王阅读数据探测完成\nProvider 候选：${probe.providerCount}\nSQLite 候选：${probe.sqliteCandidateCount}\n可读 SQLite：${probe.readableSqliteCount}\n请点击“导出诊断包”发送日志。"
+                    if (::statusText.isInitialized) statusText.text = summary
+                    if (::changeStateText.isInitialized) changeStateText.text = "状态: 汉王阅读数据探测完成"
+                    AutoRefreshLog.i(
+                        applicationContext,
+                        "Hanvon reading probe done providers=${probe.providerCount} sqliteCandidates=${probe.sqliteCandidateCount} readableSqlite=${probe.readableSqliteCount}"
+                    )
+                    writeDebugLog("hanvon_reading_probe")
+                }.onFailure {
+                    lastHanvonReadingProbeReport = "error=${it.javaClass.simpleName}:${it.message}\n"
+                    if (::statusText.isInitialized) {
+                        statusText.text = "汉王阅读数据探测失败：${it.javaClass.simpleName}:${it.message.orEmpty().take(160)}"
+                    }
+                    if (::changeStateText.isInitialized) changeStateText.text = "状态: 汉王阅读数据探测失败"
+                    appendUiDebug("hanvon reading probe failed ${it.javaClass.simpleName}:${it.message}")
+                    AutoRefreshLog.e(applicationContext, "Hanvon reading probe failed", it)
+                    writeDebugLog("hanvon_reading_probe_failed")
+                }
+            }
+        }.start()
+    }
+
     private fun exportDiagnosticPackage() {
         if (::updateStatusText.isInitialized) {
             updateStatusText.text = "${updateStatusText.text}\n诊断包：正在导出..."
@@ -2776,6 +2822,7 @@ class MainActivity : ComponentActivity() {
                 append("lastWeReadStats=").append(lastWeReadStatsDebug.ifBlank { "<empty>" }).append('\n')
                 append("lastWeReadCover=").append(lastWeReadCoverDebug.ifBlank { "<empty>" }).append('\n')
                 append("lastWeReadWallpaper=").append(lastWeReadWallpaperDebug.ifBlank { "<empty>" }).append('\n')
+                append("lastHanvonReadingProbe=").append('\n').append(lastHanvonReadingProbeReport.ifBlank { "<empty>" }).append('\n')
                 append("currentPageKey=").append(currentPageKey).append('\n')
                 if (::settingsPage.isInitialized) {
                     append("settingsPageVisibility=").append(settingsPage.visibility.toString()).append('\n')
