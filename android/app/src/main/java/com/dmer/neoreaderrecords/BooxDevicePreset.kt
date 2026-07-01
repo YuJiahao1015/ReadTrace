@@ -14,7 +14,7 @@ object BooxDevicePresets {
     const val DEFAULT_KEY = "LEAF5"
     const val CUSTOM_KEY = "CUSTOM"
 
-    val all: List<BooxDevicePreset> = listOf(
+    val boox: List<BooxDevicePreset> = listOf(
         BooxDevicePreset("POKE6S", "Poke6S", "6英寸", 758, 1024),
         BooxDevicePreset("POKE6", "Poke6", "6英寸", 1072, 1448),
         BooxDevicePreset("POKE7", "Poke7", "6英寸", 1072, 1448),
@@ -36,6 +36,25 @@ object BooxDevicePresets {
         BooxDevicePreset("NOTE_AIR3C", "Note Air3 C", "10.3英寸", 1860, 2480),
         BooxDevicePreset("T13C", "T13 C", "13.3英寸", 2400, 3200)
     )
+
+    val hanvon: List<BooxDevicePreset> = listOf(
+        BooxDevicePreset("HANVON_CLEAR6", "汉王 Clear 6 / Clear 6 Pro", "6英寸", 1072, 1448),
+        BooxDevicePreset("HANVON_CLEAR7", "汉王 Clear 7 / Clear 7 Turbo", "7英寸", 1264, 1680),
+        BooxDevicePreset("HANVON_N10_MINI", "汉王 N10 mini", "7.8英寸", 1404, 1872),
+        BooxDevicePreset("HANVON_N10", "汉王 N10 / N10 Touch / N10 2024", "10.3英寸", 1404, 1872),
+        BooxDevicePreset("HANVON_N10_PRO", "汉王 N10 Pro / N10 Pro 2024", "10.3英寸", 1860, 2480),
+        BooxDevicePreset("HANVON_N10_MAX", "汉王 N10 Max", "13.3英寸", 1650, 2200)
+    )
+
+    val all: List<BooxDevicePreset> = boox + hanvon
+
+    fun visibleForCurrentDevice(): List<BooxDevicePreset> {
+        return if (DevicePlatform.isHanvonDevice()) {
+            boox + hanvon
+        } else {
+            boox
+        }
+    }
 
     fun byKey(key: String?): BooxDevicePreset {
         return all.firstOrNull { it.key == key } ?: all.first { it.key == DEFAULT_KEY }
