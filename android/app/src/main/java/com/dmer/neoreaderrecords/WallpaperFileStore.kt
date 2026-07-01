@@ -22,21 +22,37 @@ object WallpaperFileStore {
         val fallback: Boolean = false
     )
 
-    fun save(context: Context, bitmap: Bitmap): SaveResult {
+    fun save(context: Context, bitmap: Bitmap, reason: String = "manual"): SaveResult {
         val errors = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            runCatching { return saveWithMediaStore(context, bitmap) }
+            runCatching { return withDevicePipeline(context, bitmap, saveWithMediaStore(context, bitmap), reason) }
                 .onFailure { errors += "MediaStore ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
         }
-        runCatching { return saveToPublicPictures(context, bitmap) }
+        runCatching { return withDevicePipeline(context, bitmap, saveToPublicPictures(context, bitmap), reason) }
             .onFailure { errors += "PublicPictures ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
-        runCatching { return saveToAppPictures(context, bitmap, errors.joinToString("；")) }
+        runCatching { return withDevicePipeline(context, bitmap, saveToAppPictures(context, bitmap, errors.joinToString("；")), reason) }
             .onFailure { errors += "AppPictures ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
         return SaveResult(
             ok = false,
             path = "",
             detail = errors.joinToString("；").ifBlank { "未知保存错误" },
             fallback = true
+        )
+    }
+
+    private fun withDevicePipeline(
+        context: Context,
+        bitmap: Bitmap,
+        primary: SaveResult,
+        reason: String
+    ): SaveResult {
+        val hanvon = HanvonWallpaperPipeline.install(context, bitmap, primary.path, reason)
+        if (!hanvon.active) return primary
+        val allPaths = (listOf(primary.path) + hanvon.paths).filter { it.isNotBlank() }.distinct()
+        return primary.copy(
+            path = allPaths.joinToString("\n"),
+            detail = "${primary.detail}；${hanvon.detail}",
+            fallback = primary.fallback || !hanvon.ok
         )
     }
 
