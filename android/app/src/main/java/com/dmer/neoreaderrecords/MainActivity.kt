@@ -42,7 +42,6 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatWriter
 import com.google.zxing.common.BitMatrix
 import java.io.File
-import java.io.FileWriter
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -141,7 +140,6 @@ class MainActivity : ComponentActivity() {
     private var lastWeReadStatsDebug: String = ""
     private var lastWeReadCoverDebug: String = ""
     private var lastWeReadWallpaperDebug: String = ""
-    private val debugLogName = "neoreader_debug_log.txt"
     private var selectedFontDirUri: String? = null
 
     private val pickFontTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -1330,6 +1328,10 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { openReleasePage() }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(updateButtons)
+        root.addView(Button(this).apply {
+            text = "导出诊断包"
+            setOnClickListener { exportDiagnosticPackage() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
         addHint("说明：App 只检查并跳转 GitHub Release 页面，不会自动下载或安装 APK。")
         updateReleaseStatusFromCache()
 
@@ -2036,6 +2038,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun exportDiagnosticPackage() {
+        if (::updateStatusText.isInitialized) {
+            updateStatusText.text = "${updateStatusText.text}\n诊断包：正在导出..."
+        }
+        AutoRefreshLog.i(this, "diagnostic package export requested")
+        writeDebugLog("diagnostic_export")
+        Thread {
+            val result = DiagnosticPackageExporter.export(applicationContext)
+            runOnUiThread {
+                val message = if (result.ok) {
+                    val fallbackHint = if (result.fallback) "\n提示：公共 Download 写入失败，已导出到 App 目录；如文件管理器看不到，可从系统应用信息或电脑连接后查找 App 文件目录。" else ""
+                    "诊断包已导出\n路径：${result.path}$fallbackHint"
+                } else {
+                    "诊断包导出失败\n原因：${result.detail.take(220)}"
+                }
+                if (::updateStatusText.isInitialized) {
+                    updateStatusText.text = "${updateStatusText.text}\n$message"
+                }
+                if (::statusText.isInitialized) {
+                    statusText.text = message
+                }
+                AutoRefreshLog.i(applicationContext, "diagnostic package export ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
+            }
+        }.start()
+    }
+
     private fun normalizeDailyTime(raw: String): String {
         val m = Regex("""^\s*(\d{1,2}):(\d{1,2})\s*$""").find(raw)
         val h = m?.groupValues?.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 23) ?: 22
@@ -2613,32 +2641,29 @@ class MainActivity : ComponentActivity() {
     private fun writeDebugLog(event: String) {
         try {
             if (localCalendarProbeReport.isBlank()) collectLocalCalendarDebugProbe()
-            val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!dir.exists()) dir.mkdirs()
-            val f = File(dir, debugLogName)
             val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
             val s = readSettingsFromUi()
-            FileWriter(f, false).use { w ->
-                w.append("event=").append(event).append('\n')
-                w.append("time=").append(now).append('\n')
-                w.append("deviceIdentity=").append(deviceIdentityText()).append('\n')
-                w.append("detectedBooxDevicePreset=").append(detectBooxDevicePreset()).append('\n')
-                val wereadState = WeReadClient.cachedState(this)
-                w.append("weread=").append("key=").append(wereadState.maskedKey)
+            val text = buildString {
+                append("event=").append(event).append('\n')
+                append("time=").append(now).append('\n')
+                append("deviceIdentity=").append(deviceIdentityText()).append('\n')
+                append("detectedBooxDevicePreset=").append(detectBooxDevicePreset()).append('\n')
+                val wereadState = WeReadClient.cachedState(this@MainActivity)
+                append("weread=").append("key=").append(wereadState.maskedKey)
                     .append(", status=").append(wereadState.status)
                     .append(", lastTestMs=").append(wereadState.lastTestMs.toString())
                     .append(", error=").append(wereadState.error)
                     .append('\n')
-                w.append("lastWeReadStats=").append(lastWeReadStatsDebug.ifBlank { "<empty>" }).append('\n')
-                w.append("lastWeReadCover=").append(lastWeReadCoverDebug.ifBlank { "<empty>" }).append('\n')
-                w.append("lastWeReadWallpaper=").append(lastWeReadWallpaperDebug.ifBlank { "<empty>" }).append('\n')
-                w.append("currentPageKey=").append(currentPageKey).append('\n')
+                append("lastWeReadStats=").append(lastWeReadStatsDebug.ifBlank { "<empty>" }).append('\n')
+                append("lastWeReadCover=").append(lastWeReadCoverDebug.ifBlank { "<empty>" }).append('\n')
+                append("lastWeReadWallpaper=").append(lastWeReadWallpaperDebug.ifBlank { "<empty>" }).append('\n')
+                append("currentPageKey=").append(currentPageKey).append('\n')
                 if (::settingsPage.isInitialized) {
-                    w.append("settingsPageVisibility=").append(settingsPage.visibility.toString()).append('\n')
-                    w.append("previewPageVisibility=").append(previewPage.visibility.toString()).append('\n')
+                    append("settingsPageVisibility=").append(settingsPage.visibility.toString()).append('\n')
+                    append("previewPageVisibility=").append(previewPage.visibility.toString()).append('\n')
                 }
-                w.append("selectedWeekStart=").append(selectedWeekStartYmd).append('\n')
-                w.append("settings=").append("includeUnread=").append(s.includeUnread.toString())
+                append("selectedWeekStart=").append(selectedWeekStartYmd).append('\n')
+                append("settings=").append("includeUnread=").append(s.includeUnread.toString())
                     .append(", showChart=").append(s.showChart.toString())
                     .append(", showProgressStatus=").append(s.showProgressStatus.toString())
                     .append(", showAuthor=").append(s.showAuthor.toString())
@@ -2666,30 +2691,32 @@ class MainActivity : ComponentActivity() {
                     .append(", titleFont=").append(s.titleFont)
                     .append(", bodyFont=").append(s.bodyFont)
                     .append('\n')
-                w.append("lastSavedPath=").append(lastSavedPath ?: "<null>").append('\n')
-                w.append("fontCount=").append(systemFonts.size.toString()).append('\n')
-                w.append('\n')
-                w.append("uiDebugReport=").append('\n').append(uiDebugReport.ifBlank { "<empty>" }).append('\n')
+                append("lastSavedPath=").append(lastSavedPath ?: "<null>").append('\n')
+                append("fontCount=").append(systemFonts.size.toString()).append('\n')
+                append('\n')
+                append("uiDebugReport=").append('\n').append(uiDebugReport.ifBlank { "<empty>" }).append('\n')
                 if (::settingsPage.isInitialized) {
-                    w.append("settingsPageTextDump=").append('\n').append(dumpTextTree(settingsPage)).append('\n')
+                    append("settingsPageTextDump=").append('\n').append(dumpTextTree(settingsPage)).append('\n')
                 }
-                w.append('\n')
-                w.append(fontScanReport)
-                w.append('\n')
-                w.append("barcodeDebug=").append(barcodeDebugReport.ifBlank { "<empty>" }).append('\n')
-                w.append("metadataDebug=").append(metadataDebugReport.ifBlank { "<empty>" }).append('\n')
-                w.append("metadataRowsDebug=").append('\n').append(metadataRowsDebugReport.ifBlank { "<empty>" }).append('\n')
-                w.append("localCalendarProbe=").append('\n').append(localCalendarProbeReport.ifBlank { "<empty>" }).append('\n')
+                append('\n')
+                append(fontScanReport)
+                append('\n')
+                append("barcodeDebug=").append(barcodeDebugReport.ifBlank { "<empty>" }).append('\n')
+                append("metadataDebug=").append(metadataDebugReport.ifBlank { "<empty>" }).append('\n')
+                append("metadataRowsDebug=").append('\n').append(metadataRowsDebugReport.ifBlank { "<empty>" }).append('\n')
+                append("localCalendarProbe=").append('\n').append(localCalendarProbeReport.ifBlank { "<empty>" }).append('\n')
                 val persisted = contentResolver.persistedUriPermissions
-                w.append("persistedUriPermissions=").append(persisted.size.toString()).append('\n')
+                append("persistedUriPermissions=").append(persisted.size.toString()).append('\n')
                 persisted.forEachIndexed { i, p ->
-                    w.append("persisted[").append(i.toString()).append("]=")
+                    append("persisted[").append(i.toString()).append("]=")
                         .append(p.uri.toString())
                         .append(" read=").append(p.isReadPermission.toString())
                         .append(" write=").append(p.isWritePermission.toString())
                         .append('\n')
                 }
             }
+            val result = SafeLogStore.writeText(this, SafeLogStore.DEBUG_LOG_NAME, text)
+            appendUiDebug("debug log write ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
         } catch (_: Exception) {
         }
     }
