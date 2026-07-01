@@ -2727,7 +2727,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveBitmapToPictures(bitmap: Bitmap): WallpaperFileStore.SaveResult {
-        val result = WallpaperFileStore.save(this, bitmap)
+        val result = WallpaperFileStore.save(this, bitmap, "manual_generate")
         appendUiDebug("save wallpaper ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
         return result
     }

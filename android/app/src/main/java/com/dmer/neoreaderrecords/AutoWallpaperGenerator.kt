@@ -161,7 +161,7 @@ object AutoWallpaperGenerator {
         AutoRefreshLog.i(context, "Generator start reason=$reason")
         return runCatching {
             val built = buildPreviewInternal(context, "A", true) ?: return false
-            val path = saveBitmap(context, built.bitmap)
+            val path = saveBitmap(context, built.bitmap, reason)
             AutoRefreshLog.i(context, "Generator saved path=$path ${built.summary}")
             true
         }.getOrElse {
@@ -182,7 +182,7 @@ object AutoWallpaperGenerator {
                 AutoRefreshLog.i(context, "WeRead auto skip saving fallback cache and request retry ${built.summary}")
                 return false
             }
-            val path = saveBitmap(context, built.bitmap)
+            val path = saveBitmap(context, built.bitmap, reason)
             AutoRefreshLog.i(context, "WeRead auto saved path=$path ${built.summary}")
             true
         }.getOrElse {
@@ -205,7 +205,7 @@ object AutoWallpaperGenerator {
                 AutoRefreshLog.i(context, "Mixed auto skip saving fallback cache and request retry ${built.summary}")
                 return false
             }
-            val path = saveBitmap(context, built.bitmap)
+            val path = saveBitmap(context, built.bitmap, reason)
             AutoRefreshLog.i(context, "Mixed auto saved path=$path ${built.summary}")
             true
         }.getOrElse {
@@ -3162,8 +3162,8 @@ object AutoWallpaperGenerator {
         return String.format(Locale.US, "%.1f%%", (cur / total) * 100.0)
     }
 
-    private fun saveBitmap(context: android.content.Context, bitmap: Bitmap): String {
-        val result = WallpaperFileStore.save(context, bitmap)
+    private fun saveBitmap(context: android.content.Context, bitmap: Bitmap, reason: String): String {
+        val result = WallpaperFileStore.save(context, bitmap, reason)
         AutoRefreshLog.i(context, "Wallpaper save result ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
         if (!result.ok) error(result.detail)
         return result.path
