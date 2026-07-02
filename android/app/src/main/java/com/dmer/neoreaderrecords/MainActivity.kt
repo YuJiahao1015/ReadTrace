@@ -1099,8 +1099,13 @@ class MainActivity : ComponentActivity() {
         val serialNames = listOf("DATE", "RANDOM", "CUSTOM")
         serialModeGroup = makeRadioGroup(serialOptions, selectedId(prefs.getString("serial_number_mode", "DATE") ?: "DATE", 2011, serialOptions, serialNames), RadioGroup.HORIZONTAL)
 
-        val footerOptions = listOf(3001 to "不显示\n底部留白更干净", 3002 to "只显示备注\n显示一句自定义文字", 3003 to "条码 + 备注\n增加票据装饰感")
-        val footerNames = listOf("NONE", "NOTE", "BARCODE")
+        val footerOptions = listOf(
+            3001 to "不显示\n底部留白更干净",
+            3002 to "只显示备注\n显示一句自定义文字",
+            3004 to "只显示条码\n不显示备注文字",
+            3003 to "条码 + 备注\n增加票据装饰感"
+        )
+        val footerNames = listOf("NONE", "NOTE", "BARCODE_ONLY", "BARCODE")
         footerModeGroup = makeRadioGroup(footerOptions, selectedId(prefs.getString("footer_mode", "NONE") ?: "NONE", 3001, footerOptions, footerNames))
 
         val bookNoteModeOptions = listOf(
@@ -1200,8 +1205,6 @@ class MainActivity : ComponentActivity() {
         val statsTemplateHint = addHint("说明：阅读账单显示时长、进度和图表；摘录菜单显示主厨、价格和账单合计；读书菜单显示品类、厨师、每本书备注/摘录，不显示价格，继续支持图表和条码。")
         val bookNoteModeSegment = bindSegmented("书单备注来源", bookNoteModeGroup, bookNoteModeOptions, isVertical = true)
         val bookNoteModeHint = addHint("说明：手动备注按“每本书长期备注”保存。未启用阅读数据落库时按当前 NO.01~NO.05 位置保存，排序变化可能错位；启用后会尽量按书籍 key 保存，更稳定。热门划线来自微信公开热门内容，不代表你本人划线。")
-        val excerptSourceSegment = bindSegmented("微信摘录策略", excerptSourceModeGroup, excerptSourceOptions, isVertical = true)
-        val excerptSourceHint = addHint("说明：仅我的内容=个人批注和个人划线；热门补充=个人内容为空时才用热门划线；只看热门=不显示个人内容；有啥显示啥=个人优先，其次热门。")
         val bookNoteRows = mutableListOf<View>()
         bookNoteInputs.clear()
         val savedNotePrefs = getSharedPreferences("wallpaper_settings", Context.MODE_PRIVATE)
@@ -1219,6 +1222,8 @@ class MainActivity : ComponentActivity() {
             (row.getChildAt(1) as? TextView)?.text = input.text.toString().ifBlank { titleForHint ?: "点击填写" }
             bookNoteRows += row
         }
+        val excerptSourceSegment = bindSegmented("微信摘录策略", excerptSourceModeGroup, excerptSourceOptions, isVertical = true)
+        val excerptSourceHint = addHint("说明：仅我的内容=个人批注和个人划线；热门补充=个人内容为空时才用热门划线；只看热门=不显示个人内容；有啥显示啥=个人优先，其次热门。")
         val calendarStackOrderSegment = bindSegmented(
             "月历封面堆叠顺序",
             calendarStackOrderGroup,
@@ -1472,11 +1477,11 @@ class MainActivity : ComponentActivity() {
             yAxisFixedSlider.visibility = if (showChart && yAxisModeGroup.checkedRadioButtonId == 7102) View.VISIBLE else View.GONE
 
             val footerMode = footerModeGroup.checkedRadioButtonId
-            noteRow.visibility = if (footerMode != 3001) View.VISIBLE else View.GONE
-            barcodeWidthSegment.visibility = if (footerMode == 3003) View.VISIBLE else View.GONE
-            barcodeGapSegment.visibility = if (footerMode == 3003) View.VISIBLE else View.GONE
-            footerNoteSourceSegment.visibility = if (footerMode != 3001) View.VISIBLE else View.GONE
-            footerShowBookTitleRow.visibility = if (footerMode != 3001 && footerNoteSourceGroup.checkedRadioButtonId == 3212) View.VISIBLE else View.GONE
+            noteRow.visibility = if (footerMode == 3002 || footerMode == 3003) View.VISIBLE else View.GONE
+            barcodeWidthSegment.visibility = if (footerMode == 3003 || footerMode == 3004) View.VISIBLE else View.GONE
+            barcodeGapSegment.visibility = if (footerMode == 3003 || footerMode == 3004) View.VISIBLE else View.GONE
+            footerNoteSourceSegment.visibility = if (footerMode == 3002 || footerMode == 3003) View.VISIBLE else View.GONE
+            footerShowBookTitleRow.visibility = if ((footerMode == 3002 || footerMode == 3003) && footerNoteSourceGroup.checkedRadioButtonId == 3212) View.VISIBLE else View.GONE
 
             val autoEnabled = autoRefreshCheck.isChecked
             autoModeSegment.visibility = if (autoEnabled) View.VISIBLE else View.GONE
@@ -2645,6 +2650,7 @@ class MainActivity : ComponentActivity() {
         val footerMode = when (footerModeGroup.checkedRadioButtonId) {
             3002 -> "NOTE"
             3003 -> "BARCODE"
+            3004 -> "BARCODE_ONLY"
             else -> "NONE"
         }
         val noteText = noteInput.text.toString().trim()

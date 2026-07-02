@@ -2485,14 +2485,14 @@ object AutoWallpaperGenerator {
             books.size * (80f + (if (s0.showAuthor) 42f else 0f) + (if (s0.showProgressStatus) 50f else 0f))
         }
         val headerBlock = 110f + 30f + 250f + 48f + 28f
-        val hasFooterNote = footerNoteText.isNotBlank()
-        val hasFooterBarcode = s0.footerMode == "BARCODE"
+        val hasFooterNote = footerNoteText.isNotBlank() && s0.footerMode != "BARCODE_ONLY"
+        val hasFooterBarcode = s0.footerMode == "BARCODE" || s0.footerMode == "BARCODE_ONLY"
         val hasFooter = s0.footerMode != "NONE" && (hasFooterNote || hasFooterBarcode)
-        val hasExcerptMenuBarcodeFooter = noteTemplate && s0.footerMode == "BARCODE" && hasFooter
+        val hasExcerptMenuBarcodeFooter = excerptMenu && s0.footerMode == "BARCODE" && hasFooter
         val summaryBlock = if (hasExcerptMenuBarcodeFooter) 30f + 52f + 54f + 30f else 30f + 60f + 50f
         val drawChart = s0.showChart && !excerptMenu
         val chartBlock = if (drawChart) 260f else 0f
-        val footerBlock = if (!hasFooter) 0f else if (s0.footerMode == "BARCODE") {
+        val footerBlock = if (!hasFooter) 0f else if (hasFooterBarcode) {
             if (excerptMenu) 130f else 280f
         } else 130f
         val requiredH = headerBlock + bookLines + summaryBlock + chartBlock + footerBlock + 120f
@@ -2524,12 +2524,12 @@ object AutoWallpaperGenerator {
         val unitX = w - s(140f)
         val chefX = w - s(245f)
         val priceX = w - s(85f)
-        val titleColumnMaxWidth = if (excerptMenu) {
+        val titleColumnMaxWidth = if (noteTemplate) {
             (chefX - titleX - s(52f)).coerceAtLeast(s(160f))
         } else {
             (qtyX - titleX - s(28f)).coerceAtLeast(s(160f))
         }
-        val excerptColumnMaxWidth = if (excerptMenu) {
+        val excerptColumnMaxWidth = if (noteTemplate) {
             (chefX - titleX - s(52f)).coerceAtLeast(s(160f))
         } else {
             (rightEdge - titleX).coerceAtLeast(s(180f))
@@ -2553,7 +2553,7 @@ object AutoWallpaperGenerator {
         y += s(250f)
         c.drawLine(s(40f), y, w - s(40f), y, line)
         y += s(48f)
-        c.drawText("品类", noX, y, text)
+        if (readingMenu) drawFittedText(c, "品类", titleX, y, text, titleColumnMaxWidth, Paint.Align.LEFT, 0.8f) else c.drawText("品类", noX, y, text)
         if (noteTemplate) {
             drawFittedText(c, "主厨", chefX, y, text, s(190f), Paint.Align.CENTER, 0.8f)
             if (excerptMenu) drawFittedText(c, "价格", priceX, y, text, s(90f), Paint.Align.CENTER, 0.8f)
@@ -2615,7 +2615,7 @@ object AutoWallpaperGenerator {
         }
 
         y += if (hasExcerptMenuBarcodeFooter) s(26f) else s(50f)
-        val footerReserved = if (!hasFooter) 0f else if (s0.footerMode == "BARCODE") {
+        val footerReserved = if (!hasFooter) 0f else if (hasFooterBarcode) {
             if (excerptMenu) s(118f) else s(260f)
         } else s(120f)
         val bottomSafe = (h - s(56f)).toFloat()
@@ -2669,7 +2669,7 @@ object AutoWallpaperGenerator {
             c.drawLine(s(40f), baseY, w - s(40f), baseY, line)
             if (s0.footerMode == "NOTE") {
                 if (hasFooterNote) drawFittedText(c, "备注: $footerNoteText", leftMargin, baseY + s(58f), text, (rightEdge - leftMargin), Paint.Align.LEFT, 0.78f)
-            } else if (s0.footerMode == "BARCODE") {
+            } else if (hasFooterBarcode) {
                 val bottomSafeForFooter = (h - s(56f)).toFloat()
                 val footerAreaTop = baseY + if (excerptMenu) s(28f) else s(18f)
                 val footerAreaH = (bottomSafeForFooter - footerAreaTop - s(8f)).coerceAtLeast(s(56f))
