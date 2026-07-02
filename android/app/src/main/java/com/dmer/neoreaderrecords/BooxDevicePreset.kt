@@ -47,9 +47,13 @@ object BooxDevicePresets {
     )
 
     val hisense: List<BooxDevicePreset> = listOf(
-        BooxDevicePreset("HISENSE_A5", "海信 A5 / A5 Pro / A5 Pro CC", "5.84英寸", 720, 1440),
-        BooxDevicePreset("HISENSE_A7", "海信 A7 / A7 CC", "6.7英寸", 720, 1680),
-        BooxDevicePreset("HISENSE_A9", "海信 A9 / A9 Pro", "6.1英寸", 1080, 1440)
+        BooxDevicePreset("HISENSE_A5", "海信 A5", "5.84英寸", 720, 1440),
+        BooxDevicePreset("HISENSE_A5_PRO", "海信 A5 Pro", "5.84英寸", 720, 1440),
+        BooxDevicePreset("HISENSE_A5_PRO_CC", "海信 A5 Pro CC", "5.84英寸", 720, 1440),
+        BooxDevicePreset("HISENSE_A7", "海信 A7", "6.7英寸", 720, 1680),
+        BooxDevicePreset("HISENSE_A7_CC", "海信 A7 CC", "6.7英寸", 720, 1680),
+        BooxDevicePreset("HISENSE_A9", "海信 A9", "6.1英寸", 1080, 1440),
+        BooxDevicePreset("HISENSE_A9_PRO", "海信 A9 Pro", "6.1英寸", 1080, 1440)
     )
 
     val all: List<BooxDevicePreset> = boox + hanvon + hisense

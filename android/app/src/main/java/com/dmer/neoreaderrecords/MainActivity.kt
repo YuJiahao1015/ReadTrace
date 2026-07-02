@@ -578,14 +578,20 @@ class MainActivity : ComponentActivity() {
 
     private fun detectHisenseDevicePresetFromRaw(raw: String): String {
         return when {
-            raw.contains("HLTE203T") -> "HISENSE_A5"
-            raw.contains("HLTE202T") || raw.contains("HLTE202N") -> "HISENSE_A5"
+            raw.contains("HLTE203T") -> "HISENSE_A5_PRO_CC"
+            raw.contains("HLTE202T") || raw.contains("HLTE202N") -> "HISENSE_A5_PRO"
             raw.contains("HLTE100T") -> "HISENSE_A5"
-            Regex("""HLTE[12]\d{2}[A-Z]?""").containsMatchIn(raw) -> "HISENSE_A5"
-            raw.contains("HLTE300T") || raw.contains("HLTE301T") -> "HISENSE_A7"
+            Regex("""HLTE2\d{2}[A-Z]?""").containsMatchIn(raw) -> "HISENSE_A5_PRO"
+            Regex("""HLTE1\d{2}[A-Z]?""").containsMatchIn(raw) -> "HISENSE_A5"
+            raw.contains("HLTE301T") -> "HISENSE_A7_CC"
+            raw.contains("HLTE300T") -> "HISENSE_A7"
             Regex("""HLTE3\d{2}[A-Z]?""").containsMatchIn(raw) -> "HISENSE_A7"
             raw.contains("HLTE500T") -> "HISENSE_A9"
             Regex("""HLTE5\d{2}[A-Z]?""").containsMatchIn(raw) -> "HISENSE_A9"
+            raw.contains("A5") && raw.contains("PRO") && raw.contains("CC") -> "HISENSE_A5_PRO_CC"
+            raw.contains("A5") && raw.contains("PRO") -> "HISENSE_A5_PRO"
+            raw.contains("A7") && raw.contains("CC") -> "HISENSE_A7_CC"
+            raw.contains("A9") && raw.contains("PRO") -> "HISENSE_A9_PRO"
             raw.contains("A5") -> "HISENSE_A5"
             raw.contains("A7") -> "HISENSE_A7"
             raw.contains("A9") -> "HISENSE_A9"
@@ -1123,8 +1129,21 @@ class MainActivity : ComponentActivity() {
         }
         val booxDevicePresetNames = listOf(BooxDevicePresets.CUSTOM_KEY) + visibleDevicePresets.map { it.key }
         val hasManualBooxPreset = prefs.getBoolean("boox_device_preset_user_set", false)
+        val savedBooxDevicePreset = prefs.getString("boox_device_preset", BooxDevicePresets.DEFAULT_KEY) ?: BooxDevicePresets.DEFAULT_KEY
+        val savedHisenseMergedPresetNeedsMigration = DevicePlatform.isHisenseDevice() && matchedBooxPreset != null && (
+            (savedBooxDevicePreset == "HISENSE_A5" && matchedBooxPreset in setOf("HISENSE_A5_PRO", "HISENSE_A5_PRO_CC")) ||
+                (savedBooxDevicePreset == "HISENSE_A7" && matchedBooxPreset == "HISENSE_A7_CC") ||
+                (savedBooxDevicePreset == "HISENSE_A9" && matchedBooxPreset == "HISENSE_A9_PRO")
+            )
+        if (savedHisenseMergedPresetNeedsMigration) {
+            prefs.edit()
+                .putString("boox_device_preset", matchedBooxPreset)
+                .putBoolean("boox_device_preset_user_set", false)
+                .apply()
+            DebugEventLog.i(this, "migrate hisense merged preset saved=$savedBooxDevicePreset matched=$matchedBooxPreset")
+        }
         val defaultBooxDevicePreset = if (hasManualBooxPreset && prefs.contains("boox_device_preset")) {
-            prefs.getString("boox_device_preset", BooxDevicePresets.DEFAULT_KEY) ?: BooxDevicePresets.DEFAULT_KEY
+            if (savedHisenseMergedPresetNeedsMigration) detectedBooxPreset else savedBooxDevicePreset
         } else {
             detectedBooxPreset
         }
