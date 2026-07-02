@@ -1,39 +1,36 @@
 package com.dmer.neoreaderrecords
 
 import android.os.Build
+import java.util.Locale
 
 object DevicePlatform {
-    fun isHanvonDevice(): Boolean {
+    private fun identityValues(): List<String> {
         return listOf(
             Build.MANUFACTURER,
             Build.BRAND,
             Build.MODEL,
             Build.DEVICE,
             Build.PRODUCT
-        ).any { it.orEmpty().contains("HANVON", ignoreCase = true) || it.orEmpty().contains("汉王", ignoreCase = true) }
+        )
+    }
+
+    fun identityRawUpper(): String {
+        return identityValues().joinToString(" ").uppercase(Locale.ROOT)
+    }
+
+    fun isHanvonDevice(): Boolean {
+        return identityValues().any { it.orEmpty().contains("HANVON", ignoreCase = true) || it.orEmpty().contains("汉王", ignoreCase = true) }
     }
 
     fun isHisenseDevice(): Boolean {
-        return listOf(
-            Build.MANUFACTURER,
-            Build.BRAND,
-            Build.MODEL,
-            Build.DEVICE,
-            Build.PRODUCT
-        ).any { value ->
+        return identityValues().any { value ->
             value.orEmpty().contains("HISENSE", ignoreCase = true) ||
                 value.orEmpty().contains("海信", ignoreCase = true)
         }
     }
 
     fun isBooxDevice(): Boolean {
-        return listOf(
-            Build.MANUFACTURER,
-            Build.BRAND,
-            Build.MODEL,
-            Build.DEVICE,
-            Build.PRODUCT
-        ).any {
+        return identityValues().any {
             val value = it.orEmpty()
             value.contains("ONYX", ignoreCase = true) || value.contains("BOOX", ignoreCase = true)
         }

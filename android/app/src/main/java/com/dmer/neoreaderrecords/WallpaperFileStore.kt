@@ -46,6 +46,13 @@ object WallpaperFileStore {
         primary: SaveResult,
         reason: String
     ): SaveResult {
+        val hisense = HisenseWallpaperPipeline.install(context, bitmap, reason)
+        if (hisense.active) {
+            return primary.copy(
+                detail = "${primary.detail}；${hisense.detail}",
+                fallback = primary.fallback || !hisense.ok
+            )
+        }
         val hanvon = HanvonWallpaperPipeline.install(context, bitmap, primary.path, reason)
         if (!hanvon.active) return primary
         val allPaths = (listOf(primary.path) + hanvon.paths).filter { it.isNotBlank() }.distinct()

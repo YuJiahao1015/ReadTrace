@@ -240,15 +240,50 @@ class MainActivity : ComponentActivity() {
     private fun checkAllFilesAccessPermission() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             if (!android.os.Environment.isExternalStorageManager()) {
-                try {
-                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                    intent.data = Uri.parse("package:$packageName")
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                    startActivity(intent)
-                }
+                openAllFilesAccessSettings()
             }
+        }
+    }
+
+    private fun openAllFilesAccessSettings() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                intent.data = Uri.parse("package:$packageName")
+                startActivity(intent)
+                DebugEventLog.i(this, "open permission settings appAllFiles")
+            } catch (e: Exception) {
+                val intent = Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                startActivity(intent)
+                DebugEventLog.i(this, "open permission settings allFiles fallback=${e.javaClass.simpleName}:${e.message.orEmpty().take(80)}")
+            }
+        } else {
+            DebugEventLog.i(this, "open permission settings skipped sdk=${android.os.Build.VERSION.SDK_INT}")
+        }
+    }
+
+    private fun storagePermissionSummary(): String {
+        val allFiles = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            android.os.Environment.isExternalStorageManager()
+        } else {
+            true
+        }
+        val persisted = contentResolver.persistedUriPermissions.size
+        return "全部文件访问=$allFiles，SAF授权=$persisted，公共目录不可见时请点下方按钮授权后再导出诊断包。"
+    }
+
+    private fun isCompactPhoneUi(): Boolean {
+        val widthDp = resources.configuration.screenWidthDp
+        return DevicePlatform.isHisenseDevice() || (widthDp in 1..420)
+    }
+
+    private fun compactSettingLabel(label: String): String {
+        if (!isCompactPhoneUi()) return label
+        return when (label) {
+            "阅读器尺寸预设" -> "尺寸预设"
+            "备注文本 / 条码内容" -> "备注/条码"
+            "熄屏触发最小间隔(分钟)" -> "熄屏间隔(分钟)"
+            else -> label
         }
     }
 
@@ -332,6 +367,7 @@ class MainActivity : ComponentActivity() {
     private fun setupUi() {
         isInitializingUi = true
         val prefs = getSharedPreferences("wallpaper_settings", Context.MODE_PRIVATE)
+        val compactUi = isCompactPhoneUi()
         selectedFontDirUri = prefs.getString("font_tree_uri", null)
         systemFonts.clear()
         systemFonts.addAll(loadSystemFonts())
@@ -340,7 +376,7 @@ class MainActivity : ComponentActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
+            setPadding(if (compactUi) 14 else 24, if (compactUi) 14 else 24, if (compactUi) 14 else 24, if (compactUi) 14 else 24)
             setBackgroundColor(Color.WHITE)
         }
         fun inkBorder(stroke: Int = 4, fill: Int = Color.WHITE): GradientDrawable {
@@ -353,10 +389,10 @@ class MainActivity : ComponentActivity() {
         fun makeNavItem(textValue: String, key: String, onTap: () -> Unit): TextView {
             return TextView(this).apply {
                 text = textValue
-                textSize = 18f
+                textSize = if (compactUi) 16f else 18f
                 gravity = Gravity.CENTER
                 setTypeface(Typeface.DEFAULT_BOLD)
-                setPadding(12, 22, 12, 22)
+                setPadding(if (compactUi) 6 else 12, if (compactUi) 16 else 22, if (compactUi) 6 else 12, if (compactUi) 16 else 22)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 setOnClickListener {
                     currentPageKey = key
@@ -367,12 +403,12 @@ class MainActivity : ComponentActivity() {
         fun makeActionItem(textValue: String, primary: Boolean, onTap: () -> Unit): TextView {
             return TextView(this).apply {
                 text = textValue
-                textSize = 18f
+                textSize = if (compactUi) 16f else 18f
                 gravity = Gravity.CENTER
                 setTypeface(Typeface.DEFAULT_BOLD)
                 setTextColor(if (primary) Color.WHITE else Color.BLACK)
                 background = inkBorder(4, if (primary) Color.BLACK else Color.WHITE)
-                setPadding(12, 22, 12, 22)
+                setPadding(if (compactUi) 6 else 12, if (compactUi) 16 else 22, if (compactUi) 6 else 12, if (compactUi) 16 else 22)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(0, 0, 12, 0)
                 }
@@ -394,8 +430,8 @@ class MainActivity : ComponentActivity() {
         }
         val navSettings = makeNavItem("设置", "settings") { showSettingsPage() }
         val navPreview = makeNavItem("预览", "preview") { showPreviewPage() }
-        val refreshAction = makeActionItem("刷新预览", false) { refreshPreviewData() }
-        val generateAction = makeActionItem("生成壁纸", true) { generateAndSaveFromCurrentSettings() }
+        val refreshAction = makeActionItem(if (compactUi) "刷新" else "刷新预览", false) { refreshPreviewData() }
+        val generateAction = makeActionItem(if (compactUi) "生成" else "生成壁纸", true) { generateAndSaveFromCurrentSettings() }
         refreshAction.background = null
         refreshAction.setTextColor(Color.BLACK)
         refreshAction.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
@@ -542,6 +578,14 @@ class MainActivity : ComponentActivity() {
 
     private fun detectHisenseDevicePresetFromRaw(raw: String): String {
         return when {
+            raw.contains("HLTE203T") -> "HISENSE_A5"
+            raw.contains("HLTE202T") || raw.contains("HLTE202N") -> "HISENSE_A5"
+            raw.contains("HLTE100T") -> "HISENSE_A5"
+            Regex("""HLTE[12]\d{2}[A-Z]?""").containsMatchIn(raw) -> "HISENSE_A5"
+            raw.contains("HLTE300T") || raw.contains("HLTE301T") -> "HISENSE_A7"
+            Regex("""HLTE3\d{2}[A-Z]?""").containsMatchIn(raw) -> "HISENSE_A7"
+            raw.contains("HLTE500T") -> "HISENSE_A9"
+            Regex("""HLTE5\d{2}[A-Z]?""").containsMatchIn(raw) -> "HISENSE_A9"
             raw.contains("A5") -> "HISENSE_A5"
             raw.contains("A7") -> "HISENSE_A7"
             raw.contains("A9") -> "HISENSE_A9"
@@ -567,10 +611,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildSettingsPage(prefs: android.content.SharedPreferences): View {
+        val compactUi = isCompactPhoneUi()
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.WHITE) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 40, 32, 80)
+            setPadding(if (compactUi) 20 else 32, if (compactUi) 28 else 40, if (compactUi) 20 else 32, 80)
         }
         val hiddenHost = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -595,7 +640,7 @@ class MainActivity : ComponentActivity() {
         fun addSectionTitle(text: String, hint: String? = null) {
             root.addView(TextView(this).apply {
                 this.text = text
-                textSize = 24f
+                textSize = if (compactUi) 22f else 24f
                 setTextColor(Color.BLACK)
                 setTypeface(Typeface.DEFAULT_BOLD)
                 setPadding(0, 48, 0, if (hint == null) 16 else 6)
@@ -603,7 +648,7 @@ class MainActivity : ComponentActivity() {
             if (hint != null) {
                 root.addView(TextView(this).apply {
                     this.text = hint
-                    textSize = 14f
+                    textSize = if (compactUi) 13f else 14f
                     setTextColor(Color.DKGRAY)
                     setPadding(0, 0, 0, 24)
                 })
@@ -614,7 +659,7 @@ class MainActivity : ComponentActivity() {
         fun addHint(hint: String): TextView {
             return TextView(this).apply {
                 text = hint
-                textSize = 13f
+                textSize = if (compactUi) 12f else 13f
                 setTextColor(Color.DKGRAY)
                 setPadding(0, 0, 0, 16)
                 root.addView(this)
@@ -662,7 +707,7 @@ class MainActivity : ComponentActivity() {
             }
             row.addView(TextView(this).apply {
                 text = label
-                textSize = 20f
+                textSize = if (compactUi) 18f else 20f
                 setTextColor(Color.BLACK)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
@@ -698,7 +743,7 @@ class MainActivity : ComponentActivity() {
             }
             wrap.addView(TextView(this).apply {
                 text = label
-                textSize = 20f
+                textSize = if (compactUi) 18f else 20f
                 setTextColor(Color.BLACK)
                 setPadding(0, 16, 0, 16)
             })
@@ -721,7 +766,9 @@ class MainActivity : ComponentActivity() {
                 options.forEachIndexed { index, (id, text) ->
                     val tv = TextView(this).apply {
                         this.text = text
-                        textSize = if (text.contains("\n")) 16f else 18f
+                        textSize = if (compactUi) {
+                            if (text.contains("\n")) 14f else 16f
+                        } else if (text.contains("\n")) 16f else 18f
                         setTypeface(Typeface.DEFAULT_BOLD)
                         setLineSpacing(4f, 1.0f)
                         setPadding(32, 24, 32, 24)
@@ -748,7 +795,9 @@ class MainActivity : ComponentActivity() {
                         setMargins(0, 0, 0, 32)
                     }
                 }
-                options.chunked(3).forEachIndexed { rowIndex, rowOptions ->
+                val rowSize = if (compactUi) 2 else 3
+                val rows = options.chunked(rowSize)
+                rows.forEachIndexed { rowIndex, rowOptions ->
                     val row = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
                         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -756,7 +805,9 @@ class MainActivity : ComponentActivity() {
                     rowOptions.forEachIndexed { colIndex, (id, text) ->
                         val tv = TextView(this).apply {
                             this.text = text
-                            textSize = if (text.contains("\n")) 13f else 16f
+                            textSize = if (compactUi) {
+                                if (text.contains("\n")) 12f else 15f
+                            } else if (text.contains("\n")) 13f else 16f
                             setTypeface(Typeface.DEFAULT_BOLD)
                             gravity = Gravity.CENTER
                             setLineSpacing(4f, 1.0f)
@@ -776,7 +827,7 @@ class MainActivity : ComponentActivity() {
                             })
                         }
                     }
-                    while (rowOptions.size < 3 && row.childCount < 5) {
+                    while (rowOptions.size < rowSize && row.childCount < rowSize * 2 - 1) {
                         row.addView(View(this).apply {
                             setBackgroundColor(Color.BLACK)
                             layoutParams = LinearLayout.LayoutParams(4, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -786,7 +837,7 @@ class MainActivity : ComponentActivity() {
                         })
                     }
                     segmented.addView(row)
-                    if (rowIndex < options.chunked(3).size - 1) {
+                    if (rowIndex < rows.size - 1) {
                         segmented.addView(View(this).apply {
                             setBackgroundColor(Color.BLACK)
                             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 4)
@@ -885,9 +936,9 @@ class MainActivity : ComponentActivity() {
 
         fun bindInputRow(label: String, valueProvider: () -> String, onClick: (() -> Unit)? = null): Pair<LinearLayout, TextView> {
             val box = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(32, 40, 32, 40)
+                orientation = if (compactUi) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+                gravity = if (compactUi) Gravity.START else Gravity.CENTER_VERTICAL
+                setPadding(if (compactUi) 24 else 32, if (compactUi) 26 else 40, if (compactUi) 24 else 32, if (compactUi) 26 else 40)
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     setMargins(0, 16, 0, 32)
                 }
@@ -895,20 +946,30 @@ class MainActivity : ComponentActivity() {
                 setOnClickListener { onClick?.invoke() }
             }
             box.addView(TextView(this).apply {
-                text = label
-                textSize = 20f
+                text = compactSettingLabel(label)
+                textSize = if (compactUi) 18f else 20f
                 setTextColor(Color.BLACK)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = if (compactUi) {
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                } else {
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                }
             })
             val value = TextView(this).apply {
                 text = valueProvider()
-                textSize = 20f
+                textSize = if (compactUi) 18f else 20f
                 setTypeface(Typeface.DEFAULT_BOLD)
                 setTextColor(Color.BLACK)
-                maxLines = 1
+                maxLines = if (compactUi) 3 else 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                gravity = Gravity.END
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                gravity = if (compactUi) Gravity.START else Gravity.END
+                layoutParams = if (compactUi) {
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                        setMargins(0, 10, 0, 0)
+                    }
+                } else {
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                }
             }
             box.addView(value)
             root.addView(box)
@@ -1339,6 +1400,23 @@ class MainActivity : ComponentActivity() {
         addHint("当前书识别：微信读书封面按 /shelf/sync 中 readUpdateTime 最新的书籍判断，不是直接读取微信读书正在显示的前台页面。刚切换书籍时微信同步可能有延迟，通常下一次解锁或手动刷新后会更新。")
         addHint("说明：连接和最近封面会调用 /shelf/sync；统计壁纸会调用 /readdata/detail；封面会缓存到 App 私有目录。选择“数据来源=微信读书”后，手动预览/生成会立即联网；自动模式下不在熄屏时联网，而是在解锁后预热刷新，网络未恢复会短间隔重试，成功后覆盖保存到 Pictures/NeoReader/neoreader_wallpaper.png。Key 只保存在本机 App 配置中，日志只记录脱敏后的 Key。")
         renderWeReadState(WeReadClient.cachedState(this))
+
+        addSectionTitle("存储权限与日志", "用于保存壁纸、导出诊断包和读取可见公共目录")
+        val storagePermissionText = TextView(this).apply {
+            text = storagePermissionSummary()
+            textSize = if (compactUi) 12f else 13f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 0, 0, 16)
+            root.addView(this)
+        }
+        root.addView(Button(this).apply {
+            text = "授权公共目录访问"
+            setOnClickListener {
+                openAllFilesAccessSettings()
+                storagePermissionText.text = storagePermissionSummary()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
+        addHint("说明：海信、汉王、掌阅等系统可能不会在首次安装时主动弹权限页。如果公共目录里看不到日志或壁纸，请先点这里授权；仍不行时用“导出诊断包”，诊断包会优先写入系统可见位置。")
 
         addSectionTitle("本地阅读器探测", "用于确认汉王、KOReader 等非文石阅读数据位置")
         root.addView(Button(this).apply {
@@ -2801,6 +2879,7 @@ class MainActivity : ComponentActivity() {
     private fun saveBitmapToPictures(bitmap: Bitmap): WallpaperFileStore.SaveResult {
         val result = WallpaperFileStore.save(this, bitmap, "manual_generate")
         appendUiDebug("save wallpaper ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
+        DebugEventLog.i(this, "save wallpaper ok=${result.ok} fallback=${result.fallback} path=${result.path.take(180)} detail=${result.detail.take(240)}")
         return result
     }
 
@@ -2831,6 +2910,7 @@ class MainActivity : ComponentActivity() {
 
     private fun writeDebugLog(event: String) {
         try {
+            DebugEventLog.i(this, "writeDebugLog event=$event page=$currentPageKey device=${deviceIdentityText()} preset=${detectBooxDevicePreset()}")
             if (localCalendarProbeReport.isBlank()) collectLocalCalendarDebugProbe()
             val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
             val s = readSettingsFromUi()
