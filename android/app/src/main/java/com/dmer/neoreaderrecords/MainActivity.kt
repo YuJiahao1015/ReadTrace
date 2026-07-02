@@ -503,6 +503,7 @@ class MainActivity : ComponentActivity() {
 
         return when {
             raw.contains("HANVON") || raw.contains("汉王") -> detectHanvonDevicePresetFromRaw(raw)
+            raw.contains("HISENSE") || raw.contains("海信") -> detectHisenseDevicePresetFromRaw(raw)
             raw.contains("PALMA") -> "PALMA"
             raw.contains("POKE") && raw.contains("7") && raw.contains("PRO") -> "POKE7_PRO"
             raw.contains("POKE") && raw.contains("7") -> "POKE7"
@@ -536,6 +537,15 @@ class MainActivity : ComponentActivity() {
             raw.contains("N10") && raw.contains("PRO") -> "HANVON_N10_PRO"
             raw.contains("N10") -> "HANVON_N10"
             else -> "HANVON_CLEAR7"
+        }
+    }
+
+    private fun detectHisenseDevicePresetFromRaw(raw: String): String {
+        return when {
+            raw.contains("A5") -> "HISENSE_A5"
+            raw.contains("A7") -> "HISENSE_A7"
+            raw.contains("A9") -> "HISENSE_A9"
+            else -> "HISENSE_A9"
         }
     }
 
@@ -1057,7 +1067,7 @@ class MainActivity : ComponentActivity() {
         } else {
             detectedBooxPreset
         }
-        appendUiDebug("booxDevicePreset default=$defaultBooxDevicePreset matched=${matchedBooxPreset ?: "none"} visiblePresets=${visibleDevicePresets.size} hanvon=${DevicePlatform.isHanvonDevice()} hasSaved=${prefs.contains("boox_device_preset")} userSet=$hasManualBooxPreset device=${deviceIdentityText()}")
+        appendUiDebug("booxDevicePreset default=$defaultBooxDevicePreset matched=${matchedBooxPreset ?: "none"} visiblePresets=${visibleDevicePresets.size} hanvon=${DevicePlatform.isHanvonDevice()} hisense=${DevicePlatform.isHisenseDevice()} hasSaved=${prefs.contains("boox_device_preset")} userSet=$hasManualBooxPreset device=${deviceIdentityText()}")
         booxDevicePresetGroup = makeRadioGroup(
             booxDevicePresetOptions,
             selectedId(
