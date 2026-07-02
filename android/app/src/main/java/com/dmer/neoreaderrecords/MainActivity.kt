@@ -95,6 +95,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var coverFitModeGroup: RadioGroup
     private lateinit var serialModeGroup: RadioGroup
     private lateinit var footerModeGroup: RadioGroup
+    private lateinit var bookNoteModeGroup: RadioGroup
+    private lateinit var footerNoteSourceGroup: RadioGroup
+    private lateinit var footerShowBookTitleCheck: CheckBox
+    private lateinit var excerptSourceModeGroup: RadioGroup
     private lateinit var barcodeWidthGroup: RadioGroup
     private lateinit var barcodeGapGroup: RadioGroup
     private lateinit var chartStyleGroup: RadioGroup
@@ -106,6 +110,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoModeGroup: RadioGroup
     private lateinit var autoDailyTimeInput: EditText
     private lateinit var autoMinIntervalInput: EditText
+    private val bookNoteInputs = mutableListOf<EditText>()
     private lateinit var autoModeHintText: TextView
     private lateinit var autoStateText: TextView
     private lateinit var updateStatusText: TextView
@@ -223,6 +228,10 @@ class MainActivity : ComponentActivity() {
         val barcodeWidthScale: Float,
         val barcodeGapMode: String,
         val noteText: String,
+        val bookNoteMode: String,
+        val footerNoteSource: String,
+        val footerShowBookTitle: Boolean,
+        val excerptSourceMode: String,
         val chartStyleMode: ChartStyleMode,
         val showPeakLabel: Boolean,
         val yAxisMode: YAxisMode,
@@ -1098,9 +1107,10 @@ class MainActivity : ComponentActivity() {
 
         val statsTemplateOptions = listOf(
             1241 to "阅读账单\n显示时长、进度和图表",
-            1242 to "摘录菜单\n显示最新划线/想法和阅读价格"
+            1242 to "摘录菜单\n显示最新划线/想法和阅读价格",
+            1243 to "读书菜单\n显示书名、作者和备注"
         )
-        val statsTemplateNames = listOf("RECEIPT", "EXCERPT_MENU")
+        val statsTemplateNames = listOf("RECEIPT", "EXCERPT_MENU", "READING_MENU")
         statsTemplateGroup = makeRadioGroup(statsTemplateOptions, selectedId(prefs.getString("stats_template", "RECEIPT") ?: "RECEIPT", 1241, statsTemplateOptions, statsTemplateNames), RadioGroup.VERTICAL)
 
         val calendarStackOrderOptions = listOf(
@@ -1183,6 +1193,30 @@ class MainActivity : ComponentActivity() {
         val footerNames = listOf("NONE", "NOTE", "BARCODE")
         footerModeGroup = makeRadioGroup(footerOptions, selectedId(prefs.getString("footer_mode", "NONE") ?: "NONE", 3001, footerOptions, footerNames))
 
+        val bookNoteModeOptions = listOf(
+            3201 to "自动摘录\n按书籍取最新划线/想法",
+            3202 to "手动备注\n每本书长期备注",
+            3203 to "自动优先\n没有摘录时用手动备注"
+        )
+        val bookNoteModeNames = listOf("AUTO", "MANUAL", "AUTO_THEN_MANUAL")
+        bookNoteModeGroup = makeRadioGroup(bookNoteModeOptions, selectedId(prefs.getString("book_note_mode", "AUTO") ?: "AUTO", 3201, bookNoteModeOptions, bookNoteModeNames), RadioGroup.VERTICAL)
+
+        val footerNoteSourceOptions = listOf(
+            3211 to "自定义\n使用下方备注文本",
+            3212 to "按数据来源\n取本地/微信/混合最新摘录"
+        )
+        val footerNoteSourceNames = listOf("CUSTOM", "DATA_SOURCE")
+        footerNoteSourceGroup = makeRadioGroup(footerNoteSourceOptions, selectedId(prefs.getString("footer_note_source", "CUSTOM") ?: "CUSTOM", 3211, footerNoteSourceOptions, footerNoteSourceNames), RadioGroup.VERTICAL)
+
+        val excerptSourceOptions = listOf(
+            3221 to "仅我的内容\n个人批注 + 个人划线",
+            3222 to "热门补充\n我的内容为空时用热门划线",
+            3223 to "只看热门\n只显示微信热门划线",
+            3224 to "有啥显示啥\n个人优先，其次热门"
+        )
+        val excerptSourceNames = listOf("PERSONAL_ONLY", "PERSONAL_THEN_POPULAR", "POPULAR_ONLY", "ANY")
+        excerptSourceModeGroup = makeRadioGroup(excerptSourceOptions, selectedId(prefs.getString("excerpt_source_mode", "PERSONAL_ONLY") ?: "PERSONAL_ONLY", 3221, excerptSourceOptions, excerptSourceNames), RadioGroup.VERTICAL)
+
         val barcodeWidthOptions = listOf(3101 to "细(0.8x)\n更轻", 3102 to "标准(1.0x)\n默认", 3103 to "粗(1.2x)\n更醒目")
         val savedBarcodeWidth = when (prefs.getFloat("barcode_width_scale", 1.0f)) {
             0.8f -> 3101
@@ -1213,6 +1247,7 @@ class MainActivity : ComponentActivity() {
         showBookDurationCheck = makeCheck(prefs.getBoolean("show_book_duration", true))
         showChartCheck = makeCheck(prefs.getBoolean("show_chart", true))
         showPeakLabelCheck = makeCheck(prefs.getBoolean("show_peak_label", true))
+        footerShowBookTitleCheck = makeCheck(prefs.getBoolean("footer_show_book_title", true))
         readingDataStoreCheck = makeCheck(
             prefs.getBoolean(AutoRefreshConfig.KEY_READING_DATA_STORE_ENABLED, false)
         )
@@ -1252,7 +1287,28 @@ class MainActivity : ComponentActivity() {
         val wallpaperModeSegment = bindSegmented("壁纸类型", wallpaperModeGroup, wallpaperOptions, isVertical = true)
         val wallpaperModeHint = addHint("说明：统计壁纸生成阅读账单；当前阅读封面会按所选数据来源取最近书籍封面，Neo 阅读器只读本地封面，微信读书会联网获取并缓存封面；自动封面优先会先尝试封面，失败时回退到账单；月历封面墙按所选来源读取数据，Neo 使用本地阅读事件，微信读书使用精确每日总时长和快照差分确认的日级书籍。提示：Neo 封面依赖 NeoReader 自身写入本地元数据，通常退出当前书籍后再锁屏更容易刷新；微信数据在解锁后生成，通常下一次锁屏显示最新结果。")
         val statsTemplateSegment = bindSegmented("统计壁纸模板", statsTemplateGroup, statsTemplateOptions, isVertical = true)
-        val statsTemplateHint = addHint("说明：摘录菜单会保留票据顶部和书单编号，右侧按阅读时长换算价格；价格=向上取整(阅读分钟÷10)，最低¥1，封顶¥999。微信读书书籍会尝试显示最新划线或想法，没有摘录则不显示。")
+        val statsTemplateHint = addHint("说明：阅读账单显示时长、进度和图表；摘录菜单显示主厨、价格和账单合计；读书菜单显示品类、厨师、每本书备注/摘录，不显示价格，继续支持图表和条码。")
+        val bookNoteModeSegment = bindSegmented("书单备注来源", bookNoteModeGroup, bookNoteModeOptions, isVertical = true)
+        val bookNoteModeHint = addHint("说明：手动备注按“每本书长期备注”保存。未启用阅读数据落库时按当前 NO.01~NO.05 位置保存，排序变化可能错位；启用后会尽量按书籍 key 保存，更稳定。热门划线来自微信公开热门内容，不代表你本人划线。")
+        val excerptSourceSegment = bindSegmented("微信摘录策略", excerptSourceModeGroup, excerptSourceOptions, isVertical = true)
+        val excerptSourceHint = addHint("说明：仅我的内容=个人批注和个人划线；热门补充=个人内容为空时才用热门划线；只看热门=不显示个人内容；有啥显示啥=个人优先，其次热门。")
+        val bookNoteRows = mutableListOf<View>()
+        bookNoteInputs.clear()
+        val savedNotePrefs = getSharedPreferences("wallpaper_settings", Context.MODE_PRIVATE)
+        for (i in 0 until 5) {
+            val titleForHint = savedNotePrefs.getString("last_book_order_$i", "")?.takeIf { it.isNotBlank() }
+            val keyNote = (savedNotePrefs.getString("last_book_keys_$i", "") ?: "")
+                .split("|")
+                .firstNotNullOfOrNull { key ->
+                    key.trim().takeIf { it.isNotBlank() }?.let { savedNotePrefs.getString("book_note_key_${it.hashCode()}", "") }
+                        ?.takeIf { it.isNotBlank() }
+                }
+            val input = makeInput(keyNote ?: (savedNotePrefs.getString("book_note_$i", "") ?: ""))
+            bookNoteInputs.add(input)
+            val row = bindEditRow("NO.${(i + 1).toString().padStart(2, '0')} 备注", input, numericOnly = false, maxDigits = null)
+            (row.getChildAt(1) as? TextView)?.text = input.text.toString().ifBlank { titleForHint ?: "点击填写" }
+            bookNoteRows += row
+        }
         val calendarStackOrderSegment = bindSegmented(
             "月历封面堆叠顺序",
             calendarStackOrderGroup,
@@ -1326,7 +1382,10 @@ class MainActivity : ComponentActivity() {
         addSectionTitle("底部备注与条码", "备注文本与装饰条码参数")
         val footerSegment = bindSegmented("底部备注/条码", footerModeGroup, footerOptions, isVertical = true)
         val noteRow = bindEditRow("备注文本 / 条码内容", noteInput)
-        addHint("说明：备注会显示在底部；条码只是装饰风格，不保证所有扫码软件都能识别。")
+        addHint("说明：备注会显示在底部；条码只是装饰风格，不保证所有扫码软件都能识别。条码现在和备注解耦，即使备注为空也会按账单内容生成装饰条码。")
+        val footerNoteSourceSegment = bindSegmented("底部备注来源", footerNoteSourceGroup, footerNoteSourceOptions, isVertical = true)
+        val footerShowBookTitleRow = bindToggle("自动备注显示书名", footerShowBookTitleCheck)
+        addHint("说明：选择“按数据来源”时，会按当前来源取最新一条本地/微信/混合摘录；打开书名后显示为“备注 ——《书名》”。")
         val barcodeWidthSegment = bindSegmented("条码粗细强度", barcodeWidthGroup, barcodeWidthOptions, isVertical = false)
         val barcodeGapSegment = bindSegmented("条码留白密度", barcodeGapGroup, barcodeGapOptions, isVertical = false)
 
@@ -1507,6 +1566,12 @@ class MainActivity : ComponentActivity() {
             val statsVisible = wallpaperModeGroup.checkedRadioButtonId == 1201
             statsTemplateSegment.visibility = if (statsVisible) View.VISIBLE else View.GONE
             statsTemplateHint.visibility = if (statsVisible) View.VISIBLE else View.GONE
+            val noteTemplateVisible = statsVisible && (statsTemplateGroup.checkedRadioButtonId == 1242 || statsTemplateGroup.checkedRadioButtonId == 1243)
+            bookNoteModeSegment.visibility = if (noteTemplateVisible) View.VISIBLE else View.GONE
+            bookNoteModeHint.visibility = if (noteTemplateVisible) View.VISIBLE else View.GONE
+            excerptSourceSegment.visibility = if (noteTemplateVisible) View.VISIBLE else View.GONE
+            excerptSourceHint.visibility = if (noteTemplateVisible) View.VISIBLE else View.GONE
+            bookNoteRows.forEach { it.visibility = if (noteTemplateVisible && bookNoteModeGroup.checkedRadioButtonId != 3201) View.VISIBLE else View.GONE }
             val calendarVisible = wallpaperModeGroup.checkedRadioButtonId == 1204
             calendarStackOrderSegment.visibility = if (calendarVisible) View.VISIBLE else View.GONE
             calendarStackOrderHint.visibility = if (calendarVisible) View.VISIBLE else View.GONE
@@ -1524,6 +1589,8 @@ class MainActivity : ComponentActivity() {
             noteRow.visibility = if (footerMode != 3001) View.VISIBLE else View.GONE
             barcodeWidthSegment.visibility = if (footerMode == 3003) View.VISIBLE else View.GONE
             barcodeGapSegment.visibility = if (footerMode == 3003) View.VISIBLE else View.GONE
+            footerNoteSourceSegment.visibility = if (footerMode != 3001) View.VISIBLE else View.GONE
+            footerShowBookTitleRow.visibility = if (footerMode != 3001 && footerNoteSourceGroup.checkedRadioButtonId == 3212) View.VISIBLE else View.GONE
 
             val autoEnabled = autoRefreshCheck.isChecked
             autoModeSegment.visibility = if (autoEnabled) View.VISIBLE else View.GONE
@@ -1552,7 +1619,11 @@ class MainActivity : ComponentActivity() {
         autoModeGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
         serialModeGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
         wallpaperModeGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
-        statsTemplateGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
+        statsTemplateGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
+        bookNoteModeGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
+        footerNoteSourceGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
+        excerptSourceModeGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
+        footerShowBookTitleCheck.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
         calendarStackOrderGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
         booxDevicePresetGroup.setOnCheckedChangeListener { _, _ ->
             updateConditionalVisibility()
@@ -2688,6 +2759,7 @@ class MainActivity : ComponentActivity() {
         }
         val statsTemplate = when (statsTemplateGroup.checkedRadioButtonId) {
             1242 -> "EXCERPT_MENU"
+            1243 -> "READING_MENU"
             else -> "RECEIPT"
         }
         val calendarStackOrder = when (calendarStackOrderGroup.checkedRadioButtonId) {
@@ -2738,6 +2810,21 @@ class MainActivity : ComponentActivity() {
             else -> "NONE"
         }
         val noteText = noteInput.text.toString().trim()
+        val bookNoteMode = when (bookNoteModeGroup.checkedRadioButtonId) {
+            3202 -> "MANUAL"
+            3203 -> "AUTO_THEN_MANUAL"
+            else -> "AUTO"
+        }
+        val footerNoteSource = when (footerNoteSourceGroup.checkedRadioButtonId) {
+            3212 -> "DATA_SOURCE"
+            else -> "CUSTOM"
+        }
+        val excerptSourceMode = when (excerptSourceModeGroup.checkedRadioButtonId) {
+            3222 -> "PERSONAL_THEN_POPULAR"
+            3223 -> "POPULAR_ONLY"
+            3224 -> "ANY"
+            else -> "PERSONAL_ONLY"
+        }
         val barcodeWidthScale = when (barcodeWidthGroup.checkedRadioButtonId) {
             3101 -> 0.8f
             3103 -> 1.2f
@@ -2750,7 +2837,7 @@ class MainActivity : ComponentActivity() {
         }
         val titleFont = fontSpec(titleFontSpinner.selectedItem?.toString() ?: "SERIF_BOLD")
         val bodyFont = fontSpec(bodyFontSpinner.selectedItem?.toString() ?: "MONO")
-        return Settings(includeUnread, showChart, showProgressStatus, showAuthor, showBookDuration, minDurationMinutes, topN, weekStart, weekEnd, periodMode, readingFilterMode, sourceMode, wallpaperMode, statsTemplate, calendarStackOrder, coverFitMode, progressMode, timeUnit, receiptTitle, receiptTitleSize, receiptBodySize, serialNumberMode, serialNumberCustom, serialNumberSize, booxDevicePreset, customWallpaperWidth, customWallpaperHeight, footerMode, barcodeWidthScale, barcodeGapMode, noteText, chartStyleMode, showPeakLabel, yAxisMode, yAxisFixedMaxMinutes, titleFont, bodyFont)
+        return Settings(includeUnread, showChart, showProgressStatus, showAuthor, showBookDuration, minDurationMinutes, topN, weekStart, weekEnd, periodMode, readingFilterMode, sourceMode, wallpaperMode, statsTemplate, calendarStackOrder, coverFitMode, progressMode, timeUnit, receiptTitle, receiptTitleSize, receiptBodySize, serialNumberMode, serialNumberCustom, serialNumberSize, booxDevicePreset, customWallpaperWidth, customWallpaperHeight, footerMode, barcodeWidthScale, barcodeGapMode, noteText, bookNoteMode, footerNoteSource, footerShowBookTitleCheck.isChecked, excerptSourceMode, chartStyleMode, showPeakLabel, yAxisMode, yAxisFixedMaxMinutes, titleFont, bodyFont)
     }
 
     private fun saveSettings(settings: Settings) {
@@ -2787,6 +2874,10 @@ class MainActivity : ComponentActivity() {
             .putFloat("barcode_width_scale", settings.barcodeWidthScale)
             .putString("barcode_gap_mode", settings.barcodeGapMode)
             .putString("note_text", settings.noteText)
+            .putString("book_note_mode", settings.bookNoteMode)
+            .putString("footer_note_source", settings.footerNoteSource)
+            .putBoolean("footer_show_book_title", settings.footerShowBookTitle)
+            .putString("excerpt_source_mode", settings.excerptSourceMode)
             .putString("chart_style_mode", settings.chartStyleMode.name)
             .putBoolean("show_peak_label", settings.showPeakLabel)
             .putBoolean(
@@ -2798,6 +2889,29 @@ class MainActivity : ComponentActivity() {
             .putString("title_font", settings.titleFont)
             .putString("body_font", settings.bodyFont)
             .apply()
+        saveBookNotesFromUi()
+    }
+
+    private fun saveBookNotesFromUi() {
+        if (bookNoteInputs.isEmpty()) return
+        val prefs = getSharedPreferences("wallpaper_settings", Context.MODE_PRIVATE)
+        for (i in 0 until 5) {
+            val note = bookNoteInputs.getOrNull(i)?.text?.toString()?.trim().orEmpty()
+            val title = prefs.getString("last_book_order_$i", "") ?: ""
+            val author = prefs.getString("last_book_author_$i", "") ?: ""
+            val keys = (prefs.getString("last_book_keys_$i", "") ?: "")
+                .split("|")
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+            val edit = prefs.edit().putString("book_note_$i", note)
+            keys.forEach { key -> edit.putString("book_note_key_${key.hashCode()}", note) }
+            edit.apply()
+            if (AutoRefreshConfig.isReadingDataStoreEnabled(this) && note.isNotBlank()) {
+                keys.firstOrNull()?.let { key ->
+                    ReadingDataStore.upsertBookNote(this, key, title.ifBlank { "NO.${i + 1}" }, author.ifBlank { null }, note)
+                }
+            }
+        }
     }
 
     private fun renderWallpaperPreview(settings: Settings): Pair<Bitmap, String> {
@@ -2989,6 +3103,10 @@ class MainActivity : ComponentActivity() {
                     .append(", customWallpaperHeight=").append(s.customWallpaperHeight.toString())
                     .append(", footerMode=").append(s.footerMode)
                     .append(", noteText=").append(s.noteText)
+                    .append(", bookNoteMode=").append(s.bookNoteMode)
+                    .append(", footerNoteSource=").append(s.footerNoteSource)
+                    .append(", footerShowBookTitle=").append(s.footerShowBookTitle.toString())
+                    .append(", excerptSourceMode=").append(s.excerptSourceMode)
                     .append(", titleFont=").append(s.titleFont)
                     .append(", bodyFont=").append(s.bodyFont)
                     .append('\n')

@@ -7,13 +7,14 @@ import android.database.sqlite.SQLiteOpenHelper
 
 object ReadingDataStore {
     private const val DB_NAME = "readtrace_reading.db"
-    private const val DB_VERSION = 3
+    private const val DB_VERSION = 4
     private const val TABLE_DAILY_BOOKS = "reading_daily_books"
     private const val TABLE_DAILY_TOTALS = "reading_daily_totals"
     private const val TABLE_PERIOD_BOOKS = "reading_period_books"
     private const val TABLE_WEREAD_BOOK_STATE = "weread_book_state"
     private const val TABLE_WEREAD_PERIOD_STATE = "weread_period_state"
     private const val TABLE_SYNC_META = "reading_sync_meta"
+    private const val TABLE_BOOK_NOTES = "reading_book_notes"
 
     data class DailyBookRecord(
         val date: String,
@@ -78,6 +79,14 @@ object ReadingDataStore {
         val trackingStartDate: String
     )
 
+    data class BookNoteRecord(
+        val bookKey: String,
+        val title: String,
+        val author: String?,
+        val note: String,
+        val updatedAt: Long
+    )
+
     private class Helper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
@@ -103,11 +112,13 @@ object ReadingDataStore {
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_daily_books_source_date ON $TABLE_DAILY_BOOKS(source, date)")
             createV2Tables(db)
             createV3Tables(db)
+            createV4Tables(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
             if (oldVersion < 2) createV2Tables(db)
             if (oldVersion < 3) createV3Tables(db)
+            if (oldVersion < 4) createV4Tables(db)
         }
 
         private fun createV2Tables(db: SQLiteDatabase) {
@@ -181,6 +192,78 @@ object ReadingDataStore {
                 )
                 """.trimIndent()
             )
+        }
+
+        private fun createV4Tables(db: SQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_BOOK_NOTES (
+                    book_key TEXT NOT NULL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    author TEXT,
+                    note TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL DEFAULT 0
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_book_notes_title ON $TABLE_BOOK_NOTES(title)")
+        }
+    }
+
+    fun upsertBookNote(context: Context, bookKey: String, title: String, author: String?, note: String): Boolean {
+        if (!AutoRefreshConfig.isReadingDataStoreEnabled(context)) return false
+        val cleanKey = bookKey.trim()
+        if (cleanKey.isBlank()) return false
+        return runCatching {
+            Helper(context.applicationContext).writableDatabase.use { db ->
+                db.insertWithOnConflict(TABLE_BOOK_NOTES, null, ContentValues().apply {
+                    put("book_key", cleanKey)
+                    put("title", title.ifBlank { cleanKey })
+                    put("author", author)
+                    put("note", note)
+                    put("updated_at", System.currentTimeMillis())
+                }, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            true
+        }.getOrElse {
+            AutoRefreshLog.e(context, "ReadingDataStore book note upsert failed key=${cleanKey.take(80)}", it)
+            false
+        }
+    }
+
+    fun queryBookNote(context: Context, bookKeys: List<String>): BookNoteRecord? {
+        if (!AutoRefreshConfig.isReadingDataStoreEnabled(context)) return null
+        val keys = bookKeys.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (keys.isEmpty()) return null
+        return runCatching {
+            Helper(context.applicationContext).readableDatabase.use { db ->
+                keys.forEach { key ->
+                    db.query(
+                        TABLE_BOOK_NOTES,
+                        arrayOf("book_key", "title", "author", "note", "updated_at"),
+                        "book_key=?",
+                        arrayOf(key),
+                        null,
+                        null,
+                        null,
+                        "1"
+                    ).use { c ->
+                        if (c.moveToFirst()) {
+                            return@runCatching BookNoteRecord(
+                                bookKey = c.getString(0),
+                                title = c.getString(1),
+                                author = c.getString(2),
+                                note = c.getString(3),
+                                updatedAt = c.getLong(4)
+                            )
+                        }
+                    }
+                }
+                null
+            }
+        }.getOrElse {
+            AutoRefreshLog.e(context, "ReadingDataStore book note query failed keys=${keys.joinToString("|").take(160)}", it)
+            null
         }
     }
 

@@ -136,6 +136,10 @@ object AutoWallpaperGenerator {
         val barcodeWidthScale: Float,
         val barcodeGapMode: String,
         val noteText: String,
+        val bookNoteMode: String,
+        val footerNoteSource: String,
+        val footerShowBookTitle: Boolean,
+        val excerptSourceMode: String,
         val chartStyleMode: String,
         val showPeakLabel: Boolean,
         val yAxisMode: String,
@@ -1574,28 +1578,97 @@ object AutoWallpaperGenerator {
         s: AutoSettings,
         fetchWeReadExcerpt: Boolean
     ): List<BookItem> {
-        return items.map { (book, scoreMs) ->
+        val noteTemplate = s.statsTemplate == "EXCERPT_MENU" || s.statsTemplate == "READING_MENU"
+        return items.mapIndexed { idx, (book, scoreMs) ->
             val priced = book.copy(menuPriceText = menuPriceText(scoreMs))
-            if (s.statsTemplate != "EXCERPT_MENU") {
+            if (!noteTemplate) {
                 priced
-            } else if (fetchWeReadExcerpt && !priced.bookId.isNullOrBlank()) {
-                val note = WeReadClient.fetchLatestNote(context, apiKey, priced.bookId)
-                if (note.ok && note.text.isNotBlank()) {
-                    priced.copy(latestExcerptText = note.text)
-                } else {
-                    priced
-                }
-            } else if (priced.localKeys.isNotEmpty()) {
-                val note = fetchLatestLocalAnnotation(context, priced.localKeys)
-                if (note != null && note.text.isNotBlank()) {
-                    priced.copy(latestExcerptText = note.text)
-                } else {
-                    priced
-                }
+            } else if (s.bookNoteMode == "MANUAL") {
+                priced.copy(latestExcerptText = loadManualBookNote(context, priced, idx))
+            } else if (s.bookNoteMode == "AUTO_THEN_MANUAL") {
+                val auto = loadAutoBookNote(context, apiKey, priced, fetchWeReadExcerpt, s)
+                priced.copy(latestExcerptText = auto.ifBlank { loadManualBookNote(context, priced, idx) })
             } else {
-                priced
+                priced.copy(latestExcerptText = loadAutoBookNote(context, apiKey, priced, fetchWeReadExcerpt, s))
             }
         }
+    }
+
+    private fun stableBookKeys(book: BookItem): List<String> {
+        val keys = mutableListOf<String>()
+        if (!book.bookId.isNullOrBlank()) keys += "WEREAD:${book.bookId}"
+        keys += book.localKeys
+        val title = book.title.trim()
+        if (title.isNotBlank()) keys += "TITLE:${title.lowercase(Locale.ROOT).hashCode()}"
+        return keys.distinct()
+    }
+
+    private fun cacheBookOrder(context: Context, books: List<BookItem>) {
+        val p = context.getSharedPreferences("wallpaper_settings", Context.MODE_PRIVATE)
+        val e = p.edit()
+        books.take(5).forEachIndexed { idx, book ->
+            e.putString("last_book_order_$idx", book.title)
+            e.putString("last_book_author_$idx", book.author.orEmpty())
+            e.putString("last_book_keys_$idx", stableBookKeys(book).joinToString("|"))
+        }
+        e.apply()
+    }
+
+    private fun loadManualBookNote(context: Context, book: BookItem, idx: Int): String {
+        val keys = stableBookKeys(book)
+        ReadingDataStore.queryBookNote(context, keys)?.note?.trim()?.let {
+            if (it.isNotBlank()) return it
+        }
+        val p = context.getSharedPreferences("wallpaper_settings", Context.MODE_PRIVATE)
+        keys.forEach { key ->
+            val note = p.getString("book_note_key_${key.hashCode()}", "")?.trim().orEmpty()
+            if (note.isNotBlank()) return note
+        }
+        return p.getString("book_note_$idx", "")?.trim().orEmpty()
+    }
+
+    private fun loadAutoBookNote(
+        context: Context,
+        apiKey: String,
+        book: BookItem,
+        fetchWeReadExcerpt: Boolean,
+        s: AutoSettings
+    ): String {
+        if (fetchWeReadExcerpt && !book.bookId.isNullOrBlank()) {
+            val personalFirst = s.excerptSourceMode != "POPULAR_ONLY"
+            val popularAllowed = s.excerptSourceMode != "PERSONAL_ONLY"
+            if (personalFirst) {
+                val personal = WeReadClient.fetchLatestNote(context, apiKey, book.bookId)
+                if (personal.ok && personal.text.isNotBlank()) return personal.text
+            }
+            if (popularAllowed) {
+                val popular = WeReadClient.fetchPopularBookmark(context, apiKey, book.bookId)
+                if (popular.ok && popular.text.isNotBlank()) return popular.text
+            }
+        }
+        if (book.localKeys.isNotEmpty()) {
+            val note = fetchLatestLocalAnnotation(context, book.localKeys)
+            if (note != null && note.text.isNotBlank()) return note.text
+        }
+        return ""
+    }
+
+    private fun resolveFooterNote(context: Context, apiKey: String, books: List<BookItem>, s: AutoSettings): String {
+        if (s.footerNoteSource != "DATA_SOURCE") return s.noteText.trim()
+        val effectiveApiKey = apiKey.ifBlank { WeReadClient.loadApiKey(context) }
+        for (book in books) {
+            val note = loadAutoBookNote(
+                context = context,
+                apiKey = effectiveApiKey,
+                book = book,
+                fetchWeReadExcerpt = !book.bookId.isNullOrBlank(),
+                s = s
+            ).trim()
+            if (note.isNotBlank()) {
+                return if (s.footerShowBookTitle) "$note ——《${book.title}》" else note
+            }
+        }
+        return ""
     }
 
     private data class LocalAnnotationResult(
@@ -2363,6 +2436,10 @@ object AutoWallpaperGenerator {
             barcodeWidthScale = p.getFloat("barcode_width_scale", 1.0f).coerceIn(0.6f, 1.6f),
             barcodeGapMode = p.getString("barcode_gap_mode", "STANDARD") ?: "STANDARD",
             noteText = p.getString("note_text", "") ?: "",
+            bookNoteMode = p.getString("book_note_mode", "AUTO") ?: "AUTO",
+            footerNoteSource = p.getString("footer_note_source", "CUSTOM") ?: "CUSTOM",
+            footerShowBookTitle = p.getBoolean("footer_show_book_title", true),
+            excerptSourceMode = p.getString("excerpt_source_mode", "PERSONAL_ONLY") ?: "PERSONAL_ONLY",
             chartStyleMode = p.getString("chart_style_mode", "LINE") ?: "LINE",
             showPeakLabel = p.getBoolean("show_peak_label", true),
             yAxisMode = p.getString("y_axis_mode", "AUTO") ?: "AUTO",
@@ -2389,20 +2466,29 @@ object AutoWallpaperGenerator {
         c.drawColor(Color.WHITE)
 
         val excerptMenu = s0.statsTemplate == "EXCERPT_MENU"
+        val readingMenu = s0.statsTemplate == "READING_MENU"
+        val noteTemplate = excerptMenu || readingMenu
+        val footerNoteText = resolveFooterNote(context, "", books, s0)
+        val barcodeSeed = footerNoteText.ifBlank {
+            "ReadTrace|${fmt(rangeStart)}|${fmt(rangeEnd)}|${stats.totalMs}|${books.joinToString("|") { it.title }}"
+        }
         val maxExcerptLines = when {
-            !excerptMenu -> 0
+            !noteTemplate -> 0
+            readingMenu && books.size <= 5 -> 2
             books.size <= 3 -> 4
             books.size <= 5 -> 3
             else -> 2
         }
-        val bookLines = if (excerptMenu) {
+        val bookLines = if (noteTemplate) {
             books.sumOf { (80f + if (!it.latestExcerptText.isNullOrBlank()) (54f + 42f * (maxExcerptLines - 1)) else 0f).toDouble() }.toFloat()
         } else {
             books.size * (80f + (if (s0.showAuthor) 42f else 0f) + (if (s0.showProgressStatus) 50f else 0f))
         }
         val headerBlock = 110f + 30f + 250f + 48f + 28f
-        val hasFooter = s0.footerMode != "NONE" && s0.noteText.isNotBlank()
-        val hasExcerptMenuBarcodeFooter = excerptMenu && s0.footerMode == "BARCODE" && hasFooter
+        val hasFooterNote = footerNoteText.isNotBlank()
+        val hasFooterBarcode = s0.footerMode == "BARCODE"
+        val hasFooter = s0.footerMode != "NONE" && (hasFooterNote || hasFooterBarcode)
+        val hasExcerptMenuBarcodeFooter = noteTemplate && s0.footerMode == "BARCODE" && hasFooter
         val summaryBlock = if (hasExcerptMenuBarcodeFooter) 30f + 52f + 54f + 30f else 30f + 60f + 50f
         val drawChart = s0.showChart && !excerptMenu
         val chartBlock = if (drawChart) 260f else 0f
@@ -2468,27 +2554,29 @@ object AutoWallpaperGenerator {
         c.drawLine(s(40f), y, w - s(40f), y, line)
         y += s(48f)
         c.drawText("品类", noX, y, text)
-        if (excerptMenu) {
+        if (noteTemplate) {
             drawFittedText(c, "主厨", chefX, y, text, s(190f), Paint.Align.CENTER, 0.8f)
-            drawFittedText(c, "价格", priceX, y, text, s(90f), Paint.Align.CENTER, 0.8f)
+            if (excerptMenu) drawFittedText(c, "价格", priceX, y, text, s(90f), Paint.Align.CENTER, 0.8f)
         } else {
             drawFittedText(c, "数量", qtyX, y, text, s(84f), Paint.Align.CENTER, 0.8f)
             drawFittedText(c, "单位", unitX, y, text, s(84f), Paint.Align.CENTER, 0.8f)
         }
         y += s(28f)
         c.drawLine(s(40f), y, w - s(40f), y, line)
+        cacheBookOrder(context, books)
 
         books.forEachIndexed { idx, b ->
             y += s(80f)
             c.drawText("NO.${(idx + 1).toString().padStart(2, '0')}", noX, y, h1)
             drawFittedText(c, b.title, titleX, y, h1, titleColumnMaxWidth, Paint.Align.LEFT, 0.68f)
-            if (excerptMenu) {
+            if (noteTemplate) {
                 drawFittedText(c, b.author ?: "未知", chefX, y, h1, s(215f), Paint.Align.CENTER, 0.62f)
-                drawFittedText(c, b.menuPriceText ?: "¥1", priceX, y, h1, s(90f), Paint.Align.CENTER, 0.72f)
+                if (excerptMenu) drawFittedText(c, b.menuPriceText ?: "¥1", priceX, y, h1, s(90f), Paint.Align.CENTER, 0.72f)
                 val excerpt = b.latestExcerptText?.trim().orEmpty()
                 if (excerpt.isNotBlank()) {
                     y += s(58f)
-                    y = drawMultiLineText(c, "摘：$excerpt", titleX, y, excerptPaint, excerptColumnMaxWidth, s(42f), maxExcerptLines)
+                    val prefix = if (readingMenu && s0.bookNoteMode == "MANUAL") "" else "摘："
+                    y = drawMultiLineText(c, "$prefix$excerpt", titleX, y, excerptPaint, excerptColumnMaxWidth, s(42f), maxExcerptLines)
                 }
             } else {
                 drawFittedText(c, "1", qtyX, y, h1, s(84f), Paint.Align.CENTER, 0.8f)
@@ -2511,9 +2599,11 @@ object AutoWallpaperGenerator {
         c.drawLine(s(40f), y, w - s(40f), y, line)
         if (hasExcerptMenuBarcodeFooter) {
             y += s(52f)
-            drawFittedText(c, "整单备注：${s0.noteText}", leftMargin, y, mono, (rightEdge - leftMargin), Paint.Align.LEFT, 0.72f)
-            y += s(54f)
-            drawFittedText(c, "账单合计: ${menuTotalPriceText(books)}", rightEdge, y, h1, (w * 0.56f), Paint.Align.RIGHT, 0.66f)
+            if (hasFooterNote) drawFittedText(c, "整单备注：$footerNoteText", leftMargin, y, mono, (rightEdge - leftMargin), Paint.Align.LEFT, 0.72f)
+            if (excerptMenu) {
+                y += s(54f)
+                drawFittedText(c, "账单合计: ${menuTotalPriceText(books)}", rightEdge, y, h1, (w * 0.56f), Paint.Align.RIGHT, 0.66f)
+            }
         } else if (excerptMenu) {
             y += s(60f)
             drawFittedText(c, "账单合计: ${menuTotalPriceText(books)}", rightEdge, y, h1, (w * 0.54f), Paint.Align.RIGHT, 0.72f)
@@ -2578,7 +2668,7 @@ object AutoWallpaperGenerator {
             val baseY = if (drawChart) (chartBottomUsed + s(64f)) else if (hasExcerptMenuBarcodeFooter) y else (y + s(16f))
             c.drawLine(s(40f), baseY, w - s(40f), baseY, line)
             if (s0.footerMode == "NOTE") {
-                drawFittedText(c, "备注: ${s0.noteText}", leftMargin, baseY + s(58f), text, (rightEdge - leftMargin), Paint.Align.LEFT, 0.78f)
+                if (hasFooterNote) drawFittedText(c, "备注: $footerNoteText", leftMargin, baseY + s(58f), text, (rightEdge - leftMargin), Paint.Align.LEFT, 0.78f)
             } else if (s0.footerMode == "BARCODE") {
                 val bottomSafeForFooter = (h - s(56f)).toFloat()
                 val footerAreaTop = baseY + if (excerptMenu) s(28f) else s(18f)
@@ -2590,7 +2680,7 @@ object AutoWallpaperGenerator {
                 } else {
                     s(168f).toInt().coerceAtLeast(120)
                 }
-                val qr = buildQrBitmap(s0.noteText, qrSize)
+                val qr = buildQrBitmap(barcodeSeed, qrSize)
                 if (qr != null) {
                     if (excerptMenu) {
                         val gap = maxOf(s(24f), w * 0.018f)
@@ -2608,7 +2698,7 @@ object AutoWallpaperGenerator {
                         val qrY = blockTop + ((blockH - qr.height) / 2f).coerceAtLeast(0f)
                         val decorY = blockTop + ((blockH - decorH) / 2f).coerceAtLeast(0f)
                         c.drawBitmap(qr, groupX, qrY, null)
-                        drawBarcodeDecor(c, decorX, decorY, decorW, decorH, s0.noteText, s0.barcodeWidthScale, s0.barcodeGapMode, black)
+                        drawBarcodeDecor(c, decorX, decorY, decorW, decorH, barcodeSeed, s0.barcodeWidthScale, s0.barcodeGapMode, black)
                     } else {
                         val qrX = s(60f)
                         val qrY = baseY + s(18f)
@@ -2617,12 +2707,12 @@ object AutoWallpaperGenerator {
                         val decorY = qrY + s(10f)
                         val decorW = (w - decorX - s(60f)).coerceAtLeast(s(220f))
                         val decorH = (qr.height - s(20f)).toFloat().coerceAtLeast(s(60f))
-                        drawBarcodeDecor(c, decorX, decorY, decorW, decorH, s0.noteText, s0.barcodeWidthScale, s0.barcodeGapMode, black)
+                        drawBarcodeDecor(c, decorX, decorY, decorW, decorH, barcodeSeed, s0.barcodeWidthScale, s0.barcodeGapMode, black)
                         val textY = qrY + qr.height + s(34f)
-                        drawFittedText(c, s0.noteText, qrX, textY, mono, (rightEdge - qrX), Paint.Align.LEFT, 0.78f)
+                        if (hasFooterNote) drawFittedText(c, footerNoteText, qrX, textY, mono, (rightEdge - qrX), Paint.Align.LEFT, 0.78f)
                     }
                 } else {
-                    drawFittedText(c, "二维码生成失败，备注: ${s0.noteText}", leftMargin, baseY + s(58f), text, (rightEdge - leftMargin), Paint.Align.LEFT, 0.78f)
+                    if (hasFooterNote) drawFittedText(c, "二维码生成失败，备注: $footerNoteText", leftMargin, baseY + s(58f), text, (rightEdge - leftMargin), Paint.Align.LEFT, 0.78f)
                 }
             }
         }
