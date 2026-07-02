@@ -47,7 +47,7 @@ object BooxDevicePresets {
     )
 
     val hisense: List<BooxDevicePreset> = listOf(
-        BooxDevicePreset("HISENSE_A5", "海信 A5 / A5 Pro", "5.84英寸", 720, 1440),
+        BooxDevicePreset("HISENSE_A5", "海信 A5 / A5 Pro / A5 Pro CC", "5.84英寸", 720, 1440),
         BooxDevicePreset("HISENSE_A7", "海信 A7 / A7 CC", "6.7英寸", 720, 1680),
         BooxDevicePreset("HISENSE_A9", "海信 A9 / A9 Pro", "6.1英寸", 1080, 1440)
     )
@@ -56,8 +56,8 @@ object BooxDevicePresets {
 
     fun visibleForCurrentDevice(): List<BooxDevicePreset> {
         return when {
-            DevicePlatform.isHanvonDevice() -> boox + hanvon
-            DevicePlatform.isHisenseDevice() -> boox + hisense
+            DevicePlatform.isHanvonDevice() -> hanvon
+            DevicePlatform.isHisenseDevice() -> hisense
             else -> boox
         }
     }
