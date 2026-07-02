@@ -13,6 +13,19 @@ object DevicePlatform {
         ).any { it.orEmpty().contains("HANVON", ignoreCase = true) || it.orEmpty().contains("汉王", ignoreCase = true) }
     }
 
+    fun isHisenseDevice(): Boolean {
+        return listOf(
+            Build.MANUFACTURER,
+            Build.BRAND,
+            Build.MODEL,
+            Build.DEVICE,
+            Build.PRODUCT
+        ).any { value ->
+            value.orEmpty().contains("HISENSE", ignoreCase = true) ||
+                value.orEmpty().contains("海信", ignoreCase = true)
+        }
+    }
+
     fun isBooxDevice(): Boolean {
         return listOf(
             Build.MANUFACTURER,
