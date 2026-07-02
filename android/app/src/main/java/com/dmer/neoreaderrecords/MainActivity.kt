@@ -1872,8 +1872,13 @@ class MainActivity : ComponentActivity() {
         val saved = saveBitmapToPictures(bmp)
         if (saved.ok) {
             lastSavedPath = saved.path
-            statusText.text = "已生成并覆盖文件\n$result\n路径: ${saved.path}${if (saved.fallback) "\n提示：公共图片目录保存失败，已保存到 App 目录。" else ""}"
-            changeStateText.text = "状态: 已生成并保存｜尺寸: $previewPresetText"
+            val fallbackHint = if (saved.fallback) "\n提示：文件已生成，但部分保存/系统壁纸设置步骤走了兜底或失败。\n详情：${saved.detail.take(260)}" else ""
+            statusText.text = "已生成并覆盖文件\n$result\n路径: ${saved.path}$fallbackHint"
+            changeStateText.text = if (saved.fallback) {
+                "状态: 已生成，需核对系统壁纸设置｜尺寸: $previewPresetText"
+            } else {
+                "状态: 已生成并保存｜尺寸: $previewPresetText"
+            }
         } else {
             statusText.text = "壁纸生成成功，但保存失败\n$result\n错误: ${saved.detail}"
             changeStateText.text = "状态: 保存失败｜尺寸: $previewPresetText"
@@ -2164,8 +2169,13 @@ class MainActivity : ComponentActivity() {
                     if (saved.ok) lastSavedPath = saved.path
                     previewPresetText = wallpaperSizeDisplayText(readSettingsFromUi())
                     if (saved.ok) {
-                        statusText.text = "${sourceLabel}壁纸已生成并覆盖文件\n${preview.summary}\n路径: ${saved.path}${if (saved.fallback) "\n提示：公共图片目录保存失败，已保存到 App 目录。" else ""}"
-                        changeStateText.text = "状态: ${sourceLabel}壁纸已生成并保存｜尺寸: $previewPresetText"
+                        val fallbackHint = if (saved.fallback) "\n提示：文件已生成，但部分保存/系统壁纸设置步骤走了兜底或失败。\n详情：${saved.detail.take(260)}" else ""
+                        statusText.text = "${sourceLabel}壁纸已生成并覆盖文件\n${preview.summary}\n路径: ${saved.path}$fallbackHint"
+                        changeStateText.text = if (saved.fallback) {
+                            "状态: ${sourceLabel}壁纸已生成，需核对系统壁纸设置｜尺寸: $previewPresetText"
+                        } else {
+                            "状态: ${sourceLabel}壁纸已生成并保存｜尺寸: $previewPresetText"
+                        }
                         lastWeReadWallpaperDebug = "ok=true, period=$periodLabel, saved=${saved.path}, fallback=${saved.fallback}, detail=${saved.detail}, summary=${preview.summary}"
                     } else {
                         statusText.text = "${sourceLabel}壁纸生成成功，但保存失败\n${preview.summary}\n错误: ${saved.detail}"
