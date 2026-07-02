@@ -4,6 +4,8 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Build
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 
 object HisenseWallpaperPipeline {
     data class Result(
@@ -30,44 +32,89 @@ object HisenseWallpaperPipeline {
             return Result(active = true, ok = false, detail = detail)
         }
 
-        val attempts = mutableListOf<String>()
+        val failures = mutableListOf<String>()
+        val successes = mutableListOf<String>()
+        val pngBytes = runCatching {
+            ByteArrayOutputStream().use { out ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) error("bitmap compress failed")
+                out.toByteArray()
+            }
+        }.getOrElse {
+            failures += "compress ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+            ByteArray(0)
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             runCatching {
                 manager.setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK)
             }.onSuccess {
-                val detail = "hisense=active ok method=FLAG_LOCK result=$it"
-                AutoRefreshLog.i(context, "Hisense pipeline $detail")
-                DebugEventLog.i(context, "Hisense pipeline $detail")
-                return Result(active = true, ok = true, detail = detail)
+                successes += "FLAG_LOCK_BITMAP result=$it"
             }.onFailure {
-                attempts += "FLAG_LOCK ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+                failures += "FLAG_LOCK_BITMAP ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
             }
 
-            runCatching {
-                manager.setBitmap(bitmap, null, true, WallpaperManager.FLAG_SYSTEM)
-            }.onSuccess {
-                val detail = "hisense=active ok method=FLAG_SYSTEM result=$it lockFailed=${attempts.joinToString("|")}"
-                AutoRefreshLog.i(context, "Hisense pipeline $detail")
-                DebugEventLog.i(context, "Hisense pipeline $detail")
-                return Result(active = true, ok = true, detail = detail)
-            }.onFailure {
-                attempts += "FLAG_SYSTEM ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+            if (pngBytes.isNotEmpty()) {
+                runCatching {
+                    manager.setStream(ByteArrayInputStream(pngBytes), null, true, WallpaperManager.FLAG_LOCK)
+                }.onSuccess {
+                    successes += "FLAG_LOCK_STREAM result=$it"
+                }.onFailure {
+                    failures += "FLAG_LOCK_STREAM ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+                }
+            }
+
+            val lockOk = successes.any { it.startsWith("FLAG_LOCK") }
+            if (!lockOk) {
+                runCatching {
+                    manager.setBitmap(bitmap, null, true, WallpaperManager.FLAG_SYSTEM)
+                }.onSuccess {
+                    successes += "FLAG_SYSTEM_BITMAP result=$it"
+                }.onFailure {
+                    failures += "FLAG_SYSTEM_BITMAP ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+                }
+
+                if (pngBytes.isNotEmpty()) {
+                    runCatching {
+                        manager.setStream(ByteArrayInputStream(pngBytes), null, true, WallpaperManager.FLAG_SYSTEM)
+                    }.onSuccess {
+                        successes += "FLAG_SYSTEM_STREAM result=$it"
+                    }.onFailure {
+                        failures += "FLAG_SYSTEM_STREAM ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+                    }
+                }
             }
         }
 
-        runCatching {
-            @Suppress("DEPRECATION")
-            manager.setBitmap(bitmap)
-        }.onSuccess {
-            val detail = "hisense=active ok method=setBitmapDefault prior=${attempts.joinToString("|")}"
+        if (successes.isEmpty()) {
+            runCatching {
+                @Suppress("DEPRECATION")
+                manager.setBitmap(bitmap)
+            }.onSuccess {
+                successes += "DEFAULT_BITMAP"
+            }.onFailure {
+                failures += "DEFAULT_BITMAP ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+            }
+
+            if (pngBytes.isNotEmpty()) {
+                runCatching {
+                    @Suppress("DEPRECATION")
+                    manager.setStream(ByteArrayInputStream(pngBytes))
+                }.onSuccess {
+                    successes += "DEFAULT_STREAM"
+                }.onFailure {
+                    failures += "DEFAULT_STREAM ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+                }
+            }
+        }
+
+        if (successes.isNotEmpty()) {
+            val detail = "hisense=active ok methods=${successes.joinToString("|")} failures=${failures.joinToString("|").ifBlank { "none" }}"
             AutoRefreshLog.i(context, "Hisense pipeline $detail")
             DebugEventLog.i(context, "Hisense pipeline $detail")
             return Result(active = true, ok = true, detail = detail)
-        }.onFailure {
-            attempts += "setBitmapDefault ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
         }
 
-        val detail = "hisense=active failed attempts=${attempts.joinToString("；").ifBlank { "none" }}"
+        val detail = "hisense=active failed attempts=${failures.joinToString("；").ifBlank { "none" }}"
         AutoRefreshLog.i(context, "Hisense pipeline $detail")
         DebugEventLog.i(context, "Hisense pipeline $detail")
         return Result(active = true, ok = false, detail = detail)
