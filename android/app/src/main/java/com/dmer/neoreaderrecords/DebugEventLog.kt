@@ -6,7 +6,7 @@ import java.util.Date
 import java.util.Locale
 
 object DebugEventLog {
-    const val LOG_NAME = "neoreader_debug_history.txt"
+    const val LOG_NAME = "neoreader_debug_history.log"
     private val lock = Any()
 
     fun i(context: Context, message: String) {

@@ -24,9 +24,9 @@ object DiagnosticPackageExporter {
         ZipOutputStream(out).use { zip ->
             addText(zip, "device_info.txt", deviceInfo(context))
             addText(zip, "log_locations.txt", logLocations(context))
-            addFirstExisting(zip, "neoreader_debug_log.txt", SafeLogStore.candidates(context, SafeLogStore.DEBUG_LOG_NAME))
+            addFirstExisting(zip, "neoreader_debug.log", SafeLogStore.candidates(context, SafeLogStore.DEBUG_LOG_NAME))
             addFirstExisting(zip, DebugEventLog.LOG_NAME, SafeLogStore.candidates(context, DebugEventLog.LOG_NAME))
-            addFirstExisting(zip, "neoreader_auto_refresh_log.txt", SafeLogStore.candidates(context, SafeLogStore.AUTO_REFRESH_LOG_NAME))
+            addFirstExisting(zip, "neoreader_auto_refresh.log", SafeLogStore.candidates(context, SafeLogStore.AUTO_REFRESH_LOG_NAME))
             addFirstExisting(zip, "neoreader_wallpaper.png", wallpaperCandidates(context))
         }
         return out.toByteArray()

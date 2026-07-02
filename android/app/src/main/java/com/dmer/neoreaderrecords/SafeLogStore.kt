@@ -10,8 +10,8 @@ import java.io.File
 import java.io.RandomAccessFile
 
 object SafeLogStore {
-    const val DEBUG_LOG_NAME = "neoreader_debug_log.txt"
-    const val AUTO_REFRESH_LOG_NAME = "neoreader_auto_refresh_log.txt"
+    const val DEBUG_LOG_NAME = "neoreader_debug.log"
+    const val AUTO_REFRESH_LOG_NAME = "neoreader_auto_refresh.log"
 
     data class WriteResult(
         val ok: Boolean,
