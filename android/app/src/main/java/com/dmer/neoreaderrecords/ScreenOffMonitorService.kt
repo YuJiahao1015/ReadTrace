@@ -30,6 +30,11 @@ class ScreenOffMonitorService : Service() {
             AutoRefreshLog.e(this, "ScreenOffMonitorService startForeground failed", it)
         }.isSuccess
         if (!foregroundOk) {
+            AutoRefreshConfig.disableScreenOffModeAfterServiceFailure(
+                this,
+                "startForeground_failed"
+            )
+            AutoRefreshLog.i(this, "ScreenOffMonitorService disabled screen-off auto refresh after foreground failure")
             stopSelf()
             return
         }
