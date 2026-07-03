@@ -2472,42 +2472,29 @@ object AutoWallpaperGenerator {
         val barcodeSeed = footerNoteText.ifBlank {
             "ReadTrace|${fmt(rangeStart)}|${fmt(rangeEnd)}|${stats.totalMs}|${books.joinToString("|") { it.title }}"
         }
-        val headerBlock = 110f + 30f + 250f + 48f + 28f
-        val hasFooterNote = footerNoteText.isNotBlank() && s0.footerMode != "BARCODE_ONLY"
-        val hasFooterBarcode = s0.footerMode == "BARCODE" || s0.footerMode == "BARCODE_ONLY"
-        val hasFooter = s0.footerMode != "NONE" && (hasFooterNote || hasFooterBarcode)
-        val hasExcerptMenuBarcodeFooter = excerptMenu && s0.footerMode == "BARCODE" && hasFooter
-        val summaryBlock = if (hasExcerptMenuBarcodeFooter) 30f + 52f + 54f + 30f else 30f + 60f + 50f
-        val drawChart = s0.showChart
-        val chartBlock = if (drawChart) 260f else 0f
-        val footerBlock = if (!hasFooter) 0f else if (hasFooterBarcode) {
-            if (excerptMenu) 130f else 280f
-        } else 130f
-        val excerptBookCount = books.count { !it.latestExcerptText.isNullOrBlank() }
-        val maxExcerptLines = if (!noteTemplate || excerptBookCount <= 0) {
-            0
-        } else {
-            val maxByBookCount = when {
-                books.size <= 3 -> 6
-                books.size <= 5 -> 4
-                else -> 3
-            }
-            val fixedWithOneExcerptLine = headerBlock +
-                books.size * 80f +
-                excerptBookCount * 54f +
-                summaryBlock +
-                chartBlock +
-                footerBlock +
-                120f
-            val extraLineBudget = (h.toFloat() - 40f - fixedWithOneExcerptLine).coerceAtLeast(0f)
-            val extraLines = (extraLineBudget / (excerptBookCount * 42f)).toInt()
-            (1 + extraLines).coerceIn(1, maxByBookCount)
+        val maxExcerptLines = when {
+            !noteTemplate -> 0
+            readingMenu && books.size <= 5 -> 2
+            books.size <= 3 -> 4
+            books.size <= 5 -> 3
+            else -> 2
         }
         val bookLines = if (noteTemplate) {
             books.sumOf { (80f + if (!it.latestExcerptText.isNullOrBlank()) (54f + 42f * (maxExcerptLines - 1)) else 0f).toDouble() }.toFloat()
         } else {
             books.size * (80f + (if (s0.showAuthor) 42f else 0f) + (if (s0.showProgressStatus) 50f else 0f))
         }
+        val headerBlock = 110f + 30f + 250f + 48f + 28f
+        val hasFooterNote = footerNoteText.isNotBlank() && s0.footerMode != "BARCODE_ONLY"
+        val hasFooterBarcode = s0.footerMode == "BARCODE" || s0.footerMode == "BARCODE_ONLY"
+        val hasFooter = s0.footerMode != "NONE" && (hasFooterNote || hasFooterBarcode)
+        val hasExcerptMenuBarcodeFooter = excerptMenu && s0.footerMode == "BARCODE" && hasFooter
+        val summaryBlock = if (hasExcerptMenuBarcodeFooter) 30f + 52f + 54f + 30f else 30f + 60f + 50f
+        val drawChart = s0.showChart && !excerptMenu
+        val chartBlock = if (drawChart) 260f else 0f
+        val footerBlock = if (!hasFooter) 0f else if (hasFooterBarcode) {
+            if (excerptMenu) 130f else 280f
+        } else 130f
         val requiredH = headerBlock + bookLines + summaryBlock + chartBlock + footerBlock + 120f
         val fitScale = (h.toFloat() - 40f) / requiredH
         val gs = fitScale.coerceIn(0.52f, 1f)
