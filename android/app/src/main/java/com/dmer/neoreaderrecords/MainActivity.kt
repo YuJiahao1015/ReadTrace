@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
     private var lastWeReadCoverDebug: String = ""
     private var lastWeReadWallpaperDebug: String = ""
     private var lastHanvonReadingProbeReport: String = ""
+    private var lastBooxReadingStateProbeReport: String = ""
     private var currentDevicePresetOptions: List<BooxDevicePreset> = BooxDevicePresets.boox
     private var selectedFontDirUri: String? = null
 
@@ -1501,12 +1502,16 @@ class MainActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
         addHint("说明：海信、汉王、掌阅等系统可能不会在首次安装时主动弹权限页。如果公共目录里看不到日志或壁纸，请先点这里授权；仍不行时用“导出诊断包”，诊断包会优先写入系统可见位置。")
 
-        addSectionTitle("本地阅读器探测", "用于确认汉王、KOReader 等非文石阅读数据位置")
+        addSectionTitle("本地阅读器探测", "用于确认文石实时状态、汉王、KOReader 等阅读数据位置")
+        root.addView(Button(this).apply {
+            text = "探测文石实时阅读状态"
+            setOnClickListener { runBooxReadingStateProbe() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
         root.addView(Button(this).apply {
             text = "探测汉王阅读数据"
             setOnClickListener { runHanvonReadingProbe() }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
-        addHint("说明：只做只读探测，不接入统计。会扫描可见 Provider 和少量公共目录 SQLite，并写入调试日志；完成后可点击“导出诊断包”发回排查。")
+        addHint("说明：只做只读探测，不接入统计。文石探测会读取最近写回的 Metadata/统计字段；建议打开一本书、翻页、切回 App 连续点几次，对比进度是否变化。汉王探测会扫描可见 Provider 和少量公共目录 SQLite。完成后可点击“导出诊断包”发回排查。")
 
         addSectionTitle("版本与更新", "GitHub Release 分发与更新检查")
         updateStatusText = TextView(this).apply {
@@ -2374,6 +2379,45 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun runBooxReadingStateProbe() {
+        if (::statusText.isInitialized) {
+            statusText.text = "正在探测文石实时阅读状态..."
+        }
+        if (::changeStateText.isInitialized) {
+            changeStateText.text = "状态: 正在探测文石阅读状态"
+        }
+        AutoRefreshLog.i(this, "Boox reading state probe requested device=${DevicePlatform.identityText()}")
+        Thread {
+            val result = runCatching { BooxReadingStateProbe.run(applicationContext) }
+            runOnUiThread {
+                result.onSuccess { probe ->
+                    lastBooxReadingStateProbeReport = probe.report
+                    val summary = buildString {
+                        append("文石阅读状态探测完成")
+                        append("\n最近书籍：").append(probe.latestTitle ?: "未识别")
+                        append("\n进度：").append(probe.latestProgress ?: "未识别")
+                        append("\n最后写回：").append(if (probe.latestAccessMs > 0L) SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(Date(probe.latestAccessMs)) else "未识别")
+                        append("\n请翻页后再次探测，并导出诊断包对比。")
+                    }
+                    if (::statusText.isInitialized) statusText.text = summary
+                    if (::changeStateText.isInitialized) changeStateText.text = "状态: 文石阅读状态探测完成"
+                    appendUiDebug("boox reading state probe title=${probe.latestTitle} progress=${probe.latestProgress} lastAccess=${probe.latestAccessMs}")
+                    AutoRefreshLog.i(applicationContext, "Boox reading state probe done title=${probe.latestTitle.orEmpty().take(40)} progress=${probe.latestProgress.orEmpty()} lastAccess=${probe.latestAccessMs}")
+                    writeDebugLog("boox_reading_state_probe")
+                }.onFailure {
+                    lastBooxReadingStateProbeReport = "error=${it.javaClass.simpleName}:${it.message}\n"
+                    if (::statusText.isInitialized) {
+                        statusText.text = "文石阅读状态探测失败：${it.javaClass.simpleName}:${it.message.orEmpty().take(160)}"
+                    }
+                    if (::changeStateText.isInitialized) changeStateText.text = "状态: 文石阅读状态探测失败"
+                    appendUiDebug("boox reading state probe failed ${it.javaClass.simpleName}:${it.message}")
+                    AutoRefreshLog.e(applicationContext, "Boox reading state probe failed", it)
+                    writeDebugLog("boox_reading_state_probe_failed")
+                }
+            }
+        }.start()
+    }
+
     private fun runHanvonReadingProbe() {
         if (::statusText.isInitialized) {
             statusText.text = "正在探测汉王阅读数据..."
@@ -3077,6 +3121,7 @@ class MainActivity : ComponentActivity() {
                 append("lastWeReadStats=").append(lastWeReadStatsDebug.ifBlank { "<empty>" }).append('\n')
                 append("lastWeReadCover=").append(lastWeReadCoverDebug.ifBlank { "<empty>" }).append('\n')
                 append("lastWeReadWallpaper=").append(lastWeReadWallpaperDebug.ifBlank { "<empty>" }).append('\n')
+                append("lastBooxReadingStateProbe=").append('\n').append(lastBooxReadingStateProbeReport.ifBlank { "<empty>" }).append('\n')
                 append("lastHanvonReadingProbe=").append('\n').append(lastHanvonReadingProbeReport.ifBlank { "<empty>" }).append('\n')
                 append("currentPageKey=").append(currentPageKey).append('\n')
                 if (::settingsPage.isInitialized) {
