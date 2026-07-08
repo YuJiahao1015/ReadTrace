@@ -303,14 +303,33 @@ object BooxReadingStateProbe {
                     out.append("result=epub_no_text\n")
                     return
                 }
-                val totalChars = textEntries.sumOf { it.second.length }.coerceAtLeast(1)
+                out.append("epubEntryChars=")
+                    .append(textEntries.take(12).joinToString("; ") { it.first.takeLast(48) + "=" + it.second.length })
+                    .append('\n')
+                val contentEntries = textEntries.filter { (name, text) ->
+                    val lower = name.lowercase(Locale.US)
+                    text.length >= 200 &&
+                        !lower.endsWith("nav.xhtml") &&
+                        !lower.endsWith("nav.html") &&
+                        !lower.contains("/nav.") &&
+                        !lower.contains("toc.") &&
+                        !lower.contains("contents") &&
+                        !lower.contains("cover") &&
+                        !lower.contains("titlepage")
+                }.ifEmpty {
+                    textEntries.filter { it.second.length >= 200 }
+                }.ifEmpty {
+                    textEntries
+                }
+                out.append("epubContentEntries=").append(contentEntries.size).append('\n')
+                val totalChars = contentEntries.sumOf { it.second.length }.coerceAtLeast(1)
                 val targetOffset = ((progressRatio ?: 0.0).coerceIn(0.0, 1.0) * totalChars).toInt()
                 var passed = 0
-                val chosen = textEntries.firstOrNull { (_, text) ->
+                val chosen = contentEntries.firstOrNull { (_, text) ->
                     val hit = targetOffset <= passed + text.length
                     if (!hit) passed += text.length
                     hit
-                } ?: textEntries.last().also {
+                } ?: contentEntries.last().also {
                     passed = totalChars - it.second.length
                 }
                 val localOffset = (targetOffset - passed).coerceIn(0, chosen.second.length)
