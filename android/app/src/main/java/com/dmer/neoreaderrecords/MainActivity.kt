@@ -1554,7 +1554,7 @@ class MainActivity : ComponentActivity() {
             text = "探测汉王阅读数据"
             setOnClickListener { runHanvonReadingProbe() }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
-        addHint("说明：只做只读探测，不接入统计。文石探测会在 App 前台自动观察 Metadata 变化，并记录最近写回的书名/进度/时间；也可手动点按钮补采样。汉王探测会扫描可见 Provider 和少量公共目录 SQLite。完成后可点击“导出诊断包”发回排查。")
+        addHint("说明：只做只读探测，不接入统计。文石探测会记录最近写回的书名/进度/时间，并尝试探测当前书正文资源；点击“导出诊断包”前会主动补跑一次完整文石探测，避免只依赖后台事件。汉王探测会扫描可见 Provider 和少量公共目录 SQLite。")
 
         addSectionTitle("版本与更新", "GitHub Release 分发与更新检查")
         updateStatusText = TextView(this).apply {
@@ -2508,28 +2508,68 @@ class MainActivity : ComponentActivity() {
 
     private fun exportDiagnosticPackage() {
         if (::updateStatusText.isInitialized) {
-            updateStatusText.text = "${updateStatusText.text}\n诊断包：正在导出..."
+            updateStatusText.text = "${updateStatusText.text}\n诊断包：正在补充探测并导出..."
         }
         AutoRefreshLog.i(this, "diagnostic package export requested")
-        writeDebugLog("diagnostic_export")
         Thread {
-            val result = DiagnosticPackageExporter.export(applicationContext)
+            val booxProbeSummary = runDiagnosticBooxReadingStateProbe()
             runOnUiThread {
-                val message = if (result.ok) {
-                    val fallbackHint = if (result.fallback) "\n提示：公共 Download 写入失败，已导出到 App 目录；如文件管理器看不到，可从系统应用信息或电脑连接后查找 App 文件目录。" else ""
-                    "诊断包已导出\n路径：${result.path}$fallbackHint"
-                } else {
-                    "诊断包导出失败\n原因：${result.detail.take(220)}"
-                }
-                if (::updateStatusText.isInitialized) {
-                    updateStatusText.text = "${updateStatusText.text}\n$message"
-                }
-                if (::statusText.isInitialized) {
-                    statusText.text = message
-                }
-                AutoRefreshLog.i(applicationContext, "diagnostic package export ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
+                writeDebugLog("diagnostic_export")
+                Thread {
+                    val result = DiagnosticPackageExporter.export(applicationContext)
+                    runOnUiThread { renderDiagnosticPackageExportResult(result, booxProbeSummary) }
+                }.start()
             }
         }.start()
+    }
+
+    private fun renderDiagnosticPackageExportResult(
+        result: SafeLogStore.WriteResult,
+        booxProbeSummary: String
+    ) {
+        val message = if (result.ok) {
+            val fallbackHint = if (result.fallback) "\n提示：公共 Download 写入失败，已导出到 App 目录；如文件管理器看不到，可从系统应用信息或电脑连接后查找 App 文件目录。" else ""
+            "诊断包已导出\n$booxProbeSummary\n路径：${result.path}$fallbackHint"
+        } else {
+            "诊断包导出失败\n$booxProbeSummary\n原因：${result.detail.take(220)}"
+        }
+        if (::updateStatusText.isInitialized) {
+            updateStatusText.text = "${updateStatusText.text}\n$message"
+        }
+        if (::statusText.isInitialized) {
+            statusText.text = message
+        }
+        AutoRefreshLog.i(applicationContext, "diagnostic package export ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
+    }
+
+    private fun runDiagnosticBooxReadingStateProbe(): String {
+        if (!DevicePlatform.isBooxDevice()) {
+            AutoRefreshLog.i(applicationContext, "diagnostic boox reading state probe skip non_boox device=${DevicePlatform.identityText()}")
+            return "文石探测：非文石设备，已跳过"
+        }
+        AutoRefreshLog.i(applicationContext, "diagnostic boox reading state probe start")
+        return runCatching {
+            val capturedAt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
+            val reason = "diagnostic_export"
+            val probe = BooxReadingStateProbe.run(applicationContext, reason)
+            val header = "auto=false reason=$reason capturedAt=$capturedAt\n"
+            lastBooxReadingStateProbeReport = header + probe.report
+            val summary = "diagnostic boox reading state probe done title=${probe.latestTitle.orEmpty().take(40)} progress=${probe.latestProgress.orEmpty()} lastAccess=${probe.latestAccessMs}"
+            AutoRefreshLog.i(applicationContext, summary)
+            DebugEventLog.i(applicationContext, summary)
+            SafeLogStore.appendText(
+                applicationContext,
+                SafeLogStore.DEBUG_LOG_NAME,
+                "\n[event=boox_reading_state_diagnostic_probe]\n$header${probe.report}\n"
+            )
+            "文石探测：已补充"
+        }.getOrElse {
+            val detail = "${it.javaClass.simpleName}:${it.message.orEmpty().take(160)}"
+            lastBooxReadingStateProbeReport = "auto=false reason=diagnostic_export error=$detail\n"
+            AutoRefreshLog.e(applicationContext, "diagnostic boox reading state probe failed", it)
+            DebugEventLog.i(applicationContext, "diagnostic boox reading state probe failed $detail")
+            "文石探测：失败 $detail"
+        }
     }
 
     private fun normalizeDailyTime(raw: String): String {
