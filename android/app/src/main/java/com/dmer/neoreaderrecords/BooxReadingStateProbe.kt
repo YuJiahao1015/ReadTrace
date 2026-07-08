@@ -8,6 +8,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipFile
+import javax.xml.parsers.DocumentBuilderFactory
 
 object BooxReadingStateProbe {
     private val metadataUri = Uri.parse("content://com.onyx.content.database.ContentProvider/Metadata")
@@ -286,14 +287,7 @@ object BooxReadingStateProbe {
     private fun probeEpubText(file: File, progressRatio: Double?, out: StringBuilder) {
         runCatching {
             ZipFile(file).use { zip ->
-                val entries = zip.entries().asSequence()
-                    .filter { !it.isDirectory }
-                    .filter { e ->
-                        val name = e.name.lowercase(Locale.US)
-                        name.endsWith(".xhtml") || name.endsWith(".html") || name.endsWith(".htm")
-                    }
-                    .sortedBy { it.name }
-                    .toList()
+                val entries = orderedEpubTextEntries(zip)
                 out.append("epubHtmlEntries=").append(entries.size).append('\n')
                 if (entries.isEmpty()) {
                     out.append("result=epub_no_html_entries\n")
@@ -375,6 +369,68 @@ object BooxReadingStateProbe {
             .replace("&#39;", "'")
             .replace(Regex("""\s+"""), " ")
             .trim()
+    }
+
+    private fun orderedEpubTextEntries(zip: ZipFile): List<java.util.zip.ZipEntry> {
+        val spineEntries = runCatching {
+            val container = zip.getEntry("META-INF/container.xml") ?: return@runCatching emptyList()
+            val containerDoc = zip.getInputStream(container).use { input ->
+                DocumentBuilderFactory.newInstance().apply {
+                    isNamespaceAware = true
+                    setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+                    setFeature("http://xml.org/sax/features/external-general-entities", false)
+                    setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+                }.newDocumentBuilder().parse(input)
+            }
+            val rootFiles = containerDoc.getElementsByTagNameNS("*", "rootfile")
+            val opfPath = (0 until rootFiles.length).asSequence()
+                .mapNotNull { idx -> rootFiles.item(idx)?.attributes?.getNamedItem("full-path")?.nodeValue }
+                .firstOrNull()
+                ?: return@runCatching emptyList()
+            val opf = zip.getEntry(opfPath) ?: return@runCatching emptyList()
+            val opfBase = opfPath.substringBeforeLast('/', missingDelimiterValue = "")
+            val opfDoc = zip.getInputStream(opf).use { input ->
+                DocumentBuilderFactory.newInstance().apply {
+                    isNamespaceAware = true
+                    setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+                    setFeature("http://xml.org/sax/features/external-general-entities", false)
+                    setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+                }.newDocumentBuilder().parse(input)
+            }
+            val manifest = mutableMapOf<String, String>()
+            val items = opfDoc.getElementsByTagNameNS("*", "item")
+            for (i in 0 until items.length) {
+                val attrs = items.item(i)?.attributes ?: continue
+                val id = attrs.getNamedItem("id")?.nodeValue.orEmpty()
+                val href = attrs.getNamedItem("href")?.nodeValue.orEmpty()
+                val mediaType = attrs.getNamedItem("media-type")?.nodeValue.orEmpty()
+                if (id.isNotBlank() && href.isNotBlank() && mediaType.contains("html", ignoreCase = true)) {
+                    manifest[id] = joinZipPath(opfBase, href)
+                }
+            }
+            val itemRefs = opfDoc.getElementsByTagNameNS("*", "itemref")
+            val ordered = mutableListOf<java.util.zip.ZipEntry>()
+            for (i in 0 until itemRefs.length) {
+                val idRef = itemRefs.item(i)?.attributes?.getNamedItem("idref")?.nodeValue.orEmpty()
+                val href = manifest[idRef] ?: continue
+                zip.getEntry(href)?.let { ordered.add(it) }
+            }
+            ordered
+        }.getOrDefault(emptyList())
+        if (spineEntries.isNotEmpty()) return spineEntries
+        return zip.entries().asSequence()
+            .filter { !it.isDirectory }
+            .filter { e ->
+                val name = e.name.lowercase(Locale.US)
+                name.endsWith(".xhtml") || name.endsWith(".html") || name.endsWith(".htm")
+            }
+            .sortedBy { it.name }
+            .toList()
+    }
+
+    private fun joinZipPath(base: String, href: String): String {
+        val cleanHref = href.substringBefore('#')
+        return if (base.isBlank()) cleanHref else "$base/$cleanHref"
     }
 
     private fun col(c: Cursor, name: String): String? {
