@@ -19,6 +19,7 @@ import androidx.core.app.NotificationCompat
 class ScreenOffMonitorService : Service() {
     private var receiver: BroadcastReceiver? = null
     private var contentObserver: ContentObserver? = null
+    private var lastBooxReadingStateProbeMs: Long = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -73,6 +74,7 @@ class ScreenOffMonitorService : Service() {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
                 super.onChange(selfChange, uri)
                 AutoRefreshLog.i(this@ScreenOffMonitorService, "ScreenOffMonitorService content_changed uri=$uri")
+                runBooxReadingStateProbe("service_metadata_changed uri=${uri ?: "unknown"}")
                 AutoRefreshWorker.enqueue(this@ScreenOffMonitorService, "book_content_changed")
             }
         }
@@ -108,6 +110,31 @@ class ScreenOffMonitorService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun runBooxReadingStateProbe(reason: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastBooxReadingStateProbeMs < 800L) {
+            AutoRefreshLog.i(this, "ScreenOffMonitorService boox state probe skip duplicate reason=$reason")
+            return
+        }
+        lastBooxReadingStateProbeMs = now
+        Thread {
+            runCatching {
+                val result = BooxReadingStateProbe.run(applicationContext, reason)
+                val summary = "ScreenOffMonitorService boox state probe title=${result.latestTitle.orEmpty().take(60)} progress=${result.latestProgress.orEmpty()} lastAccess=${result.latestAccessMs} reason=$reason"
+                AutoRefreshLog.i(applicationContext, summary)
+                DebugEventLog.i(applicationContext, summary)
+                SafeLogStore.appendText(
+                    applicationContext,
+                    SafeLogStore.DEBUG_LOG_NAME,
+                    "\n[event=boox_reading_state_service_probe]\n${result.report}\n"
+                )
+            }.onFailure {
+                AutoRefreshLog.e(applicationContext, "ScreenOffMonitorService boox state probe failed reason=$reason", it)
+                DebugEventLog.i(applicationContext, "ScreenOffMonitorService boox state probe failed reason=$reason ${it.javaClass.simpleName}:${it.message}")
+            }
+        }.start()
+    }
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
