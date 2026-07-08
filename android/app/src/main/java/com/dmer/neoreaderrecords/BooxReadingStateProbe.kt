@@ -301,6 +301,7 @@ object BooxReadingStateProbe {
                 out.append("epubTextEntries=").append(textEntries.size).append('\n')
                 if (textEntries.isEmpty()) {
                     out.append("result=epub_no_text\n")
+                    probeEpubStructure(zip, out)
                     return
                 }
                 out.append("epubEntryChars=")
@@ -316,12 +317,14 @@ object BooxReadingStateProbe {
                         !lower.contains("contents") &&
                         !lower.contains("cover") &&
                         !lower.contains("titlepage")
-                }.ifEmpty {
-                    textEntries.filter { it.second.length >= 200 }
-                }.ifEmpty {
-                    textEntries
                 }
                 out.append("epubContentEntries=").append(contentEntries.size).append('\n')
+                if (contentEntries.isEmpty()) {
+                    out.append("result=epub_no_body_text_candidates\n")
+                    out.append("hint=普通 XHTML 中未发现正文，可能是正文图片化、加密、或存放在非标准资源中。\n")
+                    probeEpubStructure(zip, out)
+                    return
+                }
                 val totalChars = contentEntries.sumOf { it.second.length }.coerceAtLeast(1)
                 val targetOffset = ((progressRatio ?: 0.0).coerceIn(0.0, 1.0) * totalChars).toInt()
                 var passed = 0
@@ -346,6 +349,7 @@ object BooxReadingStateProbe {
                     .append('\n')
                 out.append("textSample=").append(sample.take(700)).append('\n')
                 out.append("confidence=low_approx_by_epub_text_position\n")
+                probeEpubStructure(zip, out)
             }
         }.getOrElse {
             out.append("result=epub_probe_failed ")
@@ -390,16 +394,131 @@ object BooxReadingStateProbe {
             .trim()
     }
 
+    private fun probeEpubStructure(zip: ZipFile, out: StringBuilder) {
+        out.append("epubStructure\n")
+        val encryption = zip.getEntry("META-INF/encryption.xml")
+        out.append("encryptionXml=").append(encryption != null)
+        if (encryption != null) {
+            val text = runCatching {
+                zip.getInputStream(encryption).bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    .replace('\n', ' ')
+                    .replace(Regex("""\s+"""), " ")
+                    .take(500)
+            }.getOrDefault("")
+            out.append(", encryptionSample=").append(text)
+        }
+        out.append('\n')
+
+        runCatching {
+            val manifest = readEpubManifest(zip)
+            if (manifest.isNotEmpty()) {
+                out.append("manifestItems=").append(manifest.size).append('\n')
+                manifest.take(24).forEachIndexed { index, item ->
+                    out.append("manifest").append(index).append('=')
+                        .append("id=").append(item.id.take(40))
+                        .append(", href=").append(item.href.take(100))
+                        .append(", mediaType=").append(item.mediaType.take(80))
+                        .append(", size=").append(zip.getEntry(item.href)?.size ?: -1L)
+                        .append('\n')
+                }
+            }
+        }.getOrElse {
+            out.append("manifestProbeFailed=").append(it.javaClass.simpleName).append(':').append(it.message.orEmpty()).append('\n')
+        }
+
+        val entries = zip.entries().asSequence()
+            .filter { !it.isDirectory }
+            .sortedByDescending { it.size }
+            .take(32)
+            .toList()
+        out.append("largestEntries=").append(entries.size).append('\n')
+        entries.forEachIndexed { index, entry ->
+            out.append("entry").append(index).append('=')
+                .append(entry.name.take(120))
+                .append(", size=").append(entry.size)
+                .append(", compressed=").append(entry.compressedSize)
+                .append(", textLike=").append(isTextLikeEntry(entry.name))
+                .append('\n')
+        }
+
+        val textLike = zip.entries().asSequence()
+            .filter { !it.isDirectory }
+            .filter { isTextLikeEntry(it.name) }
+            .filter { it.size > 500 }
+            .sortedByDescending { it.size }
+            .take(8)
+            .toList()
+        out.append("largeTextLikeEntries=").append(textLike.size).append('\n')
+        textLike.forEachIndexed { index, entry ->
+            val sample = runCatching {
+                zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    .let { if (entry.name.endsWith(".html", true) || entry.name.endsWith(".xhtml", true)) htmlToPlainText(it) else it }
+                    .replace('\n', ' ')
+                    .replace(Regex("""\s+"""), " ")
+                    .take(500)
+            }.getOrElse { "readFailed=${it.javaClass.simpleName}:${it.message.orEmpty()}" }
+            out.append("largeText").append(index).append('=')
+                .append(entry.name.take(100))
+                .append(", size=").append(entry.size)
+                .append(", sample=").append(sample)
+                .append('\n')
+        }
+    }
+
+    private data class EpubManifestItem(
+        val id: String,
+        val href: String,
+        val mediaType: String
+    )
+
+    private fun readEpubManifest(zip: ZipFile): List<EpubManifestItem> {
+        val container = zip.getEntry("META-INF/container.xml") ?: return emptyList()
+        val containerDoc = zip.getInputStream(container).use { input ->
+            newSafeDocumentBuilderFactory().newDocumentBuilder().parse(input)
+        }
+        val rootFiles = containerDoc.getElementsByTagNameNS("*", "rootfile")
+        val opfPath = (0 until rootFiles.length).asSequence()
+            .mapNotNull { idx -> rootFiles.item(idx)?.attributes?.getNamedItem("full-path")?.nodeValue }
+            .firstOrNull()
+            ?: return emptyList()
+        val opf = zip.getEntry(opfPath) ?: return emptyList()
+        val opfBase = opfPath.substringBeforeLast('/', missingDelimiterValue = "")
+        val opfDoc = zip.getInputStream(opf).use { input ->
+            newSafeDocumentBuilderFactory().newDocumentBuilder().parse(input)
+        }
+        val items = opfDoc.getElementsByTagNameNS("*", "item")
+        val out = mutableListOf<EpubManifestItem>()
+        for (i in 0 until items.length) {
+            val attrs = items.item(i)?.attributes ?: continue
+            val id = attrs.getNamedItem("id")?.nodeValue.orEmpty()
+            val href = attrs.getNamedItem("href")?.nodeValue.orEmpty()
+            val mediaType = attrs.getNamedItem("media-type")?.nodeValue.orEmpty()
+            if (href.isNotBlank()) {
+                out.add(EpubManifestItem(id, joinZipPath(opfBase, href), mediaType))
+            }
+        }
+        return out
+    }
+
+    private fun isTextLikeEntry(name: String): Boolean {
+        val lower = name.lowercase(Locale.US)
+        return lower.endsWith(".xhtml") ||
+            lower.endsWith(".html") ||
+            lower.endsWith(".htm") ||
+            lower.endsWith(".xml") ||
+            lower.endsWith(".opf") ||
+            lower.endsWith(".ncx") ||
+            lower.endsWith(".txt") ||
+            lower.endsWith(".css") ||
+            lower.endsWith(".js") ||
+            lower.endsWith(".json")
+    }
+
     private fun orderedEpubTextEntries(zip: ZipFile): List<java.util.zip.ZipEntry> {
         val spineEntries = runCatching {
             val container = zip.getEntry("META-INF/container.xml") ?: return@runCatching emptyList()
             val containerDoc = zip.getInputStream(container).use { input ->
-                DocumentBuilderFactory.newInstance().apply {
-                    isNamespaceAware = true
-                    setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-                    setFeature("http://xml.org/sax/features/external-general-entities", false)
-                    setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-                }.newDocumentBuilder().parse(input)
+                newSafeDocumentBuilderFactory().newDocumentBuilder().parse(input)
             }
             val rootFiles = containerDoc.getElementsByTagNameNS("*", "rootfile")
             val opfPath = (0 until rootFiles.length).asSequence()
@@ -409,12 +528,7 @@ object BooxReadingStateProbe {
             val opf = zip.getEntry(opfPath) ?: return@runCatching emptyList()
             val opfBase = opfPath.substringBeforeLast('/', missingDelimiterValue = "")
             val opfDoc = zip.getInputStream(opf).use { input ->
-                DocumentBuilderFactory.newInstance().apply {
-                    isNamespaceAware = true
-                    setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-                    setFeature("http://xml.org/sax/features/external-general-entities", false)
-                    setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-                }.newDocumentBuilder().parse(input)
+                newSafeDocumentBuilderFactory().newDocumentBuilder().parse(input)
             }
             val manifest = mutableMapOf<String, String>()
             val items = opfDoc.getElementsByTagNameNS("*", "item")
@@ -450,6 +564,15 @@ object BooxReadingStateProbe {
     private fun joinZipPath(base: String, href: String): String {
         val cleanHref = href.substringBefore('#')
         return if (base.isBlank()) cleanHref else "$base/$cleanHref"
+    }
+
+    private fun newSafeDocumentBuilderFactory(): DocumentBuilderFactory {
+        return DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            setFeature("http://xml.org/sax/features/external-general-entities", false)
+            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+        }
     }
 
     private fun col(c: Cursor, name: String): String? {
