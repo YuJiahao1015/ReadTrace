@@ -2610,7 +2610,7 @@ object AutoWallpaperGenerator {
         }
         coverW = coverW.coerceAtMost(w * 0.30f)
         coverH = coverW / coverRatio
-        val coverTop = area.top + (h - coverH) / 2f
+        val coverTop = area.top + pad
         val cover = RectF(area.left + pad, coverTop, area.left + pad + coverW, coverTop + coverH)
         if (featured.item.bitmap != null) {
             drawRoundedFittedBitmap(canvas, featured.item.bitmap, cover, cover.width() * 0.12f)
@@ -2651,7 +2651,7 @@ object AutoWallpaperGenerator {
         val author = featured.item.author?.takeIf { it.isNotBlank() } ?: "未知作者"
         val meta = "$author · ${compactDuration(featured.durationMs)} · $status"
         drawFittedText(canvas, meta, textLeft, y, metaPaint, textW, Paint.Align.LEFT, 0.76f)
-        y += metaPaint.textSize * 1.10f
+        y += metaPaint.textSize * 1.48f
 
         val excerpt = featured.excerpt?.trim().orEmpty()
         if (allowExcerpt && excerpt.isNotBlank()) {
