@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 
@@ -19,7 +20,8 @@ object WallpaperFileStore {
         val ok: Boolean,
         val path: String,
         val detail: String,
-        val fallback: Boolean = false
+        val fallback: Boolean = false,
+        val contentUri: String? = null
     )
 
     fun save(context: Context, bitmap: Bitmap, reason: String = "manual"): SaveResult {
@@ -46,13 +48,6 @@ object WallpaperFileStore {
         primary: SaveResult,
         reason: String
     ): SaveResult {
-        val hisense = HisenseWallpaperPipeline.install(context, bitmap, reason)
-        if (hisense.active) {
-            return primary.copy(
-                detail = "${primary.detail}；${hisense.detail}",
-                fallback = primary.fallback || !hisense.ok
-            )
-        }
         val hanvon = HanvonWallpaperPipeline.install(context, bitmap, primary.path, reason)
         if (!hanvon.active) return primary
         val allPaths = (listOf(primary.path) + hanvon.paths).filter { it.isNotBlank() }.distinct()
@@ -88,7 +83,7 @@ object WallpaperFileStore {
             throw e
         }
         val path = "${Environment.getExternalStorageDirectory().absolutePath}/${Environment.DIRECTORY_PICTURES}/$DIR_NAME/$FILE_NAME"
-        return SaveResult(ok = true, path = path, detail = "saved=MediaStore uri=$uri")
+        return SaveResult(ok = true, path = path, detail = "saved=MediaStore uri=$uri", contentUri = uri.toString())
     }
 
     private fun findExistingMediaUri(context: Context, collection: Uri, relativePath: String): Uri? {
@@ -112,7 +107,7 @@ object WallpaperFileStore {
             if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) error("bitmap compress failed")
         }
         scan(context, file.absolutePath)
-        return SaveResult(ok = true, path = file.absolutePath, detail = "saved=public")
+        return SaveResult(ok = true, path = file.absolutePath, detail = "saved=public", contentUri = fileProviderUri(context, file))
     }
 
     private fun saveToAppPictures(context: Context, bitmap: Bitmap, priorErrors: String): SaveResult {
@@ -128,8 +123,15 @@ object WallpaperFileStore {
             ok = true,
             path = file.absolutePath,
             detail = "saved=app_fallback；publicSaveFailed=$priorErrors",
-            fallback = true
+            fallback = true,
+            contentUri = fileProviderUri(context, file)
         )
+    }
+
+    private fun fileProviderUri(context: Context, file: File): String? {
+        return runCatching {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file).toString()
+        }.getOrNull()
     }
 
     private fun scan(context: Context, path: String) {
