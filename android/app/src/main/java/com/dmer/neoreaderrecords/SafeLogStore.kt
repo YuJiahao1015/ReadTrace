@@ -49,11 +49,19 @@ object SafeLogStore {
     }
 
     fun candidates(context: Context, fileName: String): List<File> {
-        return listOfNotNull(
+        val appCandidates = listOfNotNull(
             context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, fileName) },
-            File(context.filesDir, fileName),
+            File(context.filesDir, fileName)
+        )
+        val publicCandidates = listOf(
             File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
-        ).distinctBy { it.absolutePath }
+        )
+        val ordered = if (DevicePlatform.isBooxDevice()) {
+            publicCandidates + appCandidates
+        } else {
+            appCandidates + publicCandidates
+        }
+        return ordered.distinctBy { it.absolutePath }
     }
 
     private fun writeRuntimeBytes(
@@ -63,12 +71,22 @@ object SafeLogStore {
         append: Boolean
     ): WriteResult {
         val errors = mutableListOf<String>()
+        if (DevicePlatform.isBooxDevice()) {
+            runCatching { return writePublicDownload(fileName, bytes, append) }
+                .onFailure { errors += "BooxPublicDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
+        }
+
         runCatching {
             val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
             if (!dir.exists() && !dir.mkdirs()) error("mkdirs failed: ${dir.absolutePath}")
             val file = File(dir, fileName)
             writeFile(file, bytes, append)
-            return WriteResult(true, file.absolutePath, "saved=app_log")
+            val detail = if (errors.isEmpty()) {
+                "saved=app_log"
+            } else {
+                "saved=app_log；publicSaveFailed=${errors.joinToString("；")}"
+            }
+            return WriteResult(true, file.absolutePath, detail, fallback = errors.isNotEmpty())
         }.onFailure { errors += "AppLog ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
 
         runCatching {
