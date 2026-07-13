@@ -87,6 +87,20 @@ object ReadingDataStore {
         val updatedAt: Long
     )
 
+    data class DailyBookPageRecord(
+        val date: String,
+        val source: String,
+        val bookKey: String,
+        val title: String,
+        val author: String?,
+        val durationMs: Long,
+        val progress: String?,
+        val status: Int,
+        val confidence: String,
+        val lastSeenAt: Long,
+        val updatedAt: Long
+    )
+
     private class Helper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
@@ -378,6 +392,85 @@ object ReadingDataStore {
                 }
             }
         }.getOrDefault(0)
+    }
+
+    fun countDailyBooks(context: Context, source: String?): Int {
+        val cleanSource = source?.trim()?.takeIf { it.isNotBlank() }
+        return if (cleanSource == null) {
+            countRows(context, TABLE_DAILY_BOOKS, "1=1", emptyArray<String>())
+        } else {
+            countRows(context, TABLE_DAILY_BOOKS, "source = ?", arrayOf(cleanSource))
+        }
+    }
+
+    fun queryDailyBooksPage(
+        context: Context,
+        source: String?,
+        limit: Int,
+        offset: Int
+    ): List<DailyBookPageRecord> {
+        val cleanSource = source?.trim()?.takeIf { it.isNotBlank() }
+        return runCatching {
+            val out = mutableListOf<DailyBookPageRecord>()
+            Helper(context.applicationContext).readableDatabase.use { db ->
+                db.query(
+                    TABLE_DAILY_BOOKS,
+                    arrayOf(
+                        "date", "source", "book_key", "title", "author",
+                        "duration_ms", "progress", "status", "confidence", "last_seen_at", "updated_at"
+                    ),
+                    if (cleanSource == null) null else "source = ?",
+                    if (cleanSource == null) null else arrayOf(cleanSource),
+                    null,
+                    null,
+                    "date DESC, updated_at DESC, duration_ms DESC",
+                    "${limit.coerceIn(1, 100)} OFFSET ${offset.coerceAtLeast(0)}"
+                ).use { c ->
+                    while (c.moveToNext()) {
+                        out.add(
+                            DailyBookPageRecord(
+                                date = c.getString(0),
+                                source = c.getString(1),
+                                bookKey = c.getString(2),
+                                title = c.getString(3),
+                                author = if (c.isNull(4)) null else c.getString(4),
+                                durationMs = c.getLong(5),
+                                progress = if (c.isNull(6)) null else c.getString(6),
+                                status = c.getInt(7),
+                                confidence = c.getString(8),
+                                lastSeenAt = c.getLong(9),
+                                updatedAt = c.getLong(10)
+                            )
+                        )
+                    }
+                }
+            }
+            out
+        }.getOrElse {
+            AutoRefreshLog.e(context, "ReadingDataStore page query failed source=${cleanSource ?: "ALL"}", it)
+            emptyList()
+        }
+    }
+
+    fun deleteDailyBook(context: Context, date: String, source: String, bookKey: String): Boolean {
+        val cleanDate = date.trim()
+        val cleanSource = source.trim()
+        val cleanKey = bookKey.trim()
+        if (cleanDate.isBlank() || cleanSource.isBlank() || cleanKey.isBlank()) return false
+        return runCatching {
+            val deleted = Helper(context.applicationContext).writableDatabase.use { db ->
+                db.delete(
+                    TABLE_DAILY_BOOKS,
+                    "date = ? AND source = ? AND book_key = ?",
+                    arrayOf(cleanDate, cleanSource, cleanKey)
+                )
+            }
+            AutoRefreshLog.i(context, "ReadingDataStore delete daily book date=$cleanDate source=$cleanSource key=${cleanKey.take(80)} deleted=$deleted")
+            deleted > 0
+        }.getOrElse {
+            AutoRefreshLog.e(context, "ReadingDataStore delete daily book failed date=$cleanDate source=$cleanSource key=${cleanKey.take(80)}", it)
+            false
+        }
     }
 
     fun replaceDailyTotalsForRange(
