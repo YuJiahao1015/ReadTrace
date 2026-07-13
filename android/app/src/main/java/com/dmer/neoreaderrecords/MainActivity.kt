@@ -1873,7 +1873,7 @@ class MainActivity : ComponentActivity() {
         if (saved.ok) {
             lastSavedPath = saved.path
             val fallbackHint = if (saved.fallback) "\n提示：文件已生成，但部分保存/系统壁纸设置步骤走了兜底或失败。\n详情：${saved.detail.take(260)}" else ""
-            statusText.text = "已生成并覆盖文件\n$result\n路径: ${saved.path}$fallbackHint"
+            statusText.text = "已生成并覆盖文件\n$result\n路径: ${saved.path}${hisenseSetWallpaperUiHint()}$fallbackHint"
             changeStateText.text = if (saved.fallback) {
                 "状态: 已生成，需核对系统壁纸设置｜尺寸: $previewPresetText"
             } else {
@@ -2170,7 +2170,7 @@ class MainActivity : ComponentActivity() {
                     previewPresetText = wallpaperSizeDisplayText(readSettingsFromUi())
                     if (saved.ok) {
                         val fallbackHint = if (saved.fallback) "\n提示：文件已生成，但部分保存/系统壁纸设置步骤走了兜底或失败。\n详情：${saved.detail.take(260)}" else ""
-                        statusText.text = "${sourceLabel}壁纸已生成并覆盖文件\n${preview.summary}\n路径: ${saved.path}$fallbackHint"
+                        statusText.text = "${sourceLabel}壁纸已生成并覆盖文件\n${preview.summary}\n路径: ${saved.path}${hisenseSetWallpaperUiHint()}$fallbackHint"
                         changeStateText.text = if (saved.fallback) {
                             "状态: ${sourceLabel}壁纸已生成，需核对系统壁纸设置｜尺寸: $previewPresetText"
                         } else {
@@ -2984,7 +2984,29 @@ class MainActivity : ComponentActivity() {
         val result = WallpaperFileStore.save(this, bitmap, "manual_generate")
         appendUiDebug("save wallpaper ok=${result.ok} fallback=${result.fallback} path=${result.path} detail=${result.detail.take(180)}")
         DebugEventLog.i(this, "save wallpaper ok=${result.ok} fallback=${result.fallback} path=${result.path.take(180)} detail=${result.detail.take(240)}")
+        if (result.ok && DevicePlatform.isHisenseDevice()) {
+            val setUi = HisenseWallpaperPipeline.openSetWallpaperUi(this, result)
+            val message = if (setUi.ok) {
+                "海信设置壁纸界面已打开，请在系统界面中选择桌面或锁屏壁纸。"
+            } else {
+                "海信设置壁纸界面未能打开，可从相册手动设置。\n详情：${setUi.detail.take(180)}"
+            }
+            appendUiDebug("hisense set wallpaper ui ok=${setUi.ok} detail=${setUi.detail.take(180)}")
+            DebugEventLog.i(this, "hisense set wallpaper ui ok=${setUi.ok} detail=${setUi.detail.take(240)}")
+            if (::statusText.isInitialized) {
+                statusText.text = "${statusText.text}\n$message"
+            }
+            return result.copy(
+                detail = "${result.detail}；${setUi.detail}",
+                fallback = result.fallback || !setUi.ok
+            )
+        }
         return result
+    }
+
+    private fun hisenseSetWallpaperUiHint(): String {
+        if (!DevicePlatform.isHisenseDevice()) return ""
+        return "\n海信：已尝试打开系统设置壁纸界面。请在系统界面选择桌面/锁屏；如果没有弹出，也可以从相册手动设置这张图片。"
     }
 
     private fun dumpTextTree(view: View, maxItems: Int = 80): String {

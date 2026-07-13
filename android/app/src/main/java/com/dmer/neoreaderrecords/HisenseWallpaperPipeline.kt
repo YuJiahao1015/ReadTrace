@@ -1,9 +1,13 @@
 package com.dmer.neoreaderrecords
 
 import android.app.WallpaperManager
+import android.content.ClipData
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
@@ -13,6 +17,53 @@ object HisenseWallpaperPipeline {
         val ok: Boolean,
         val detail: String
     )
+
+    fun openSetWallpaperUi(context: Context, saved: WallpaperFileStore.SaveResult): Result {
+        if (!DevicePlatform.isHisenseDevice()) {
+            return Result(active = false, ok = true, detail = "hisenseSetUi=inactive")
+        }
+        val uri = saved.contentUri?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+        if (uri == null) {
+            val detail = "hisenseSetUi=active failed noContentUri path=${saved.path.take(160)}"
+            AutoRefreshLog.i(context, "Hisense pipeline $detail")
+            DebugEventLog.i(context, "Hisense pipeline $detail")
+            return Result(active = true, ok = false, detail = detail)
+        }
+
+        val intents = listOf(
+            Intent(Intent.ACTION_ATTACH_DATA).apply {
+                setDataAndType(uri, "image/png")
+                clipData = ClipData.newUri(context.contentResolver, "ReadTrace wallpaper", uri)
+                putExtra("mimeType", "image/png")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            },
+            Intent(Intent.ACTION_SET_WALLPAPER).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            },
+            Intent(Settings.ACTION_SETTINGS)
+        )
+
+        intents.forEachIndexed { index, intent ->
+            runCatching {
+                if (context !is android.app.Activity) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            }.onSuccess {
+                val detail = "hisenseSetUi=active ok intentIndex=$index action=${intent.action} uri=$uri"
+                AutoRefreshLog.i(context, "Hisense pipeline $detail")
+                DebugEventLog.i(context, "Hisense pipeline $detail")
+                return Result(active = true, ok = true, detail = detail)
+            }.onFailure {
+                AutoRefreshLog.i(context, "Hisense pipeline set ui attempt failed index=$index action=${intent.action} ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}")
+            }
+        }
+
+        val detail = "hisenseSetUi=active failed allIntents uri=$uri"
+        AutoRefreshLog.i(context, "Hisense pipeline $detail")
+        DebugEventLog.i(context, "Hisense pipeline $detail")
+        return Result(active = true, ok = false, detail = detail)
+    }
 
     fun install(context: Context, bitmap: Bitmap, reason: String): Result {
         if (!DevicePlatform.isHisenseDevice()) {
