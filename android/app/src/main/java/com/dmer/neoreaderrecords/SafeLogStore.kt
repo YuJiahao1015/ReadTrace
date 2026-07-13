@@ -37,11 +37,17 @@ object SafeLogStore {
         bytes: ByteArray
     ): WriteResult {
         val errors = mutableListOf<String>()
-        runCatching { return writePublicDownload(fileName, bytes, append = false) }
-            .onFailure { errors += "PublicDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
+        if (DevicePlatform.isBooxDevice()) {
+            runCatching { return writePublicDownload(fileName, bytes, append = false) }
+                .onFailure { errors += "BooxPublicDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching { return writeMediaStoreDownload(context, fileName, mimeType, bytes) }
                 .onFailure { errors += "MediaStoreDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
+        }
+        if (!DevicePlatform.isBooxDevice()) {
+            runCatching { return writePublicDownload(fileName, bytes, append = false) }
+                .onFailure { errors += "PublicDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
         }
         runCatching { return writeAppDownload(context, fileName, bytes, append = false, errors.joinToString("；")) }
             .onFailure { errors += "AppDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
