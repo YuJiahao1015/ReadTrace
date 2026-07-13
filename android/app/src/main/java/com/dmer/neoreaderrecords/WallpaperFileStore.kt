@@ -83,7 +83,9 @@ object WallpaperFileStore {
             throw e
         }
         val path = "${Environment.getExternalStorageDirectory().absolutePath}/${Environment.DIRECTORY_PICTURES}/$DIR_NAME/$FILE_NAME"
-        return SaveResult(ok = true, path = path, detail = "saved=MediaStore uri=$uri", contentUri = uri.toString())
+        val mirrorDetail = mirrorToAppPictures(context, bitmap)
+        val detail = listOf("saved=MediaStore uri=$uri", mirrorDetail).filterNotNull().joinToString("；")
+        return SaveResult(ok = true, path = path, detail = detail, contentUri = uri.toString())
     }
 
     private fun findExistingMediaUri(context: Context, collection: Uri, relativePath: String): Uri? {
@@ -107,7 +109,9 @@ object WallpaperFileStore {
             if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) error("bitmap compress failed")
         }
         scan(context, file.absolutePath)
-        return SaveResult(ok = true, path = file.absolutePath, detail = "saved=public", contentUri = fileProviderUri(context, file))
+        val mirrorDetail = mirrorToAppPictures(context, bitmap)
+        val detail = listOf("saved=public", mirrorDetail).filterNotNull().joinToString("；")
+        return SaveResult(ok = true, path = file.absolutePath, detail = detail, contentUri = fileProviderUri(context, file))
     }
 
     private fun saveToAppPictures(context: Context, bitmap: Bitmap, priorErrors: String): SaveResult {
@@ -126,6 +130,21 @@ object WallpaperFileStore {
             fallback = true,
             contentUri = fileProviderUri(context, file)
         )
+    }
+
+    private fun mirrorToAppPictures(context: Context, bitmap: Bitmap): String? {
+        return runCatching {
+            val base = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES) ?: context.filesDir
+            val dir = File(base, DIR_NAME)
+            if (!dir.exists() && !dir.mkdirs()) error("mkdirs failed: ${dir.absolutePath}")
+            val file = File(dir, FILE_NAME)
+            FileOutputStream(file).use { out ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) error("bitmap compress failed")
+            }
+            "mirror=app_pictures path=${file.absolutePath}"
+        }.getOrElse {
+            "mirror=app_pictures_failed ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+        }
     }
 
     private fun fileProviderUri(context: Context, file: File): String? {

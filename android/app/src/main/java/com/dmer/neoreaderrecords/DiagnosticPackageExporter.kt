@@ -84,11 +84,19 @@ object DiagnosticPackageExporter {
     }
 
     private fun wallpaperCandidates(context: Context): List<File> {
-        return listOfNotNull(
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "NeoReader/neoreader_wallpaper.png"),
+        val appCandidates = listOfNotNull(
             context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)?.let { File(it, "NeoReader/neoreader_wallpaper.png") },
             File(context.filesDir, "NeoReader/neoreader_wallpaper.png")
-        ).distinctBy { it.absolutePath }
+        )
+        val publicCandidates = listOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "NeoReader/neoreader_wallpaper.png")
+        )
+        val ordered = if (DevicePlatform.isBooxDevice()) {
+            publicCandidates + appCandidates
+        } else {
+            appCandidates + publicCandidates
+        }
+        return ordered.distinctBy { it.absolutePath }
     }
 
     private fun addFirstExisting(zip: ZipOutputStream, entryName: String, files: List<File>) {
@@ -109,8 +117,9 @@ object DiagnosticPackageExporter {
             return
         }
         runCatching {
+            val bytes = file.inputStream().use { it.readBytes() }
             zip.putNextEntry(ZipEntry(entryName))
-            file.inputStream().use { it.copyTo(zip) }
+            zip.write(bytes)
             zip.closeEntry()
         }.onFailure {
             runCatching { zip.closeEntry() }
