@@ -2347,14 +2347,9 @@ object AutoWallpaperGenerator {
         }
         val dayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ink
-            textSize = (w * if (narrow) 0.037f else 0.032f).coerceIn(24f, 48f)
+            textSize = (w * if (narrow) 0.046f else 0.04f).coerceIn(28f, 58f)
             typeface = Typeface.create(bodyFace, Typeface.BOLD)
-        }
-        val durationPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = ink
-            textSize = (w * if (narrow) 0.026f else 0.021f).coerceIn(17f, 32f)
-            typeface = Typeface.create(bodyFace, Typeface.BOLD)
-            textAlign = Paint.Align.RIGHT
+            textAlign = Paint.Align.CENTER
         }
         val tinyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = muted
@@ -2398,19 +2393,33 @@ object AutoWallpaperGenerator {
         val gridLeft = marginX
         val gridRight = w - marginX
         val gridWidth = gridRight - gridLeft
-        val gridTop = top + titlePaint.textSize + h * if (narrow) 0.032f else 0.04f
-        val weekH = (h * if (narrow) 0.035f else 0.042f).coerceIn(34f, 64f)
-        val gridBottom = h - h * if (narrow) 0.038f else 0.048f
+        val gridTop = top + titlePaint.textSize + h * if (narrow) 0.045f else 0.052f
+        val weekH = (h * if (narrow) 0.042f else 0.048f).coerceIn(34f, 70f)
         val rowCount = data.weekRows
-        val rowH = ((gridBottom - gridTop - weekH) / rowCount.toFloat()).coerceAtLeast(78f)
         val colW = gridWidth / 7f
+        val cellGap = colW * if (narrow) 0.08f else 0.10f
+        val maxCardByWidth = colW - cellGap
         val cardScale = when {
-            narrow -> 0.88f
-            wide -> 0.82f
-            else -> 0.86f
+            narrow -> 0.98f
+            wide -> 0.92f
+            else -> 0.95f
         }
-        val cardSide = minOf(colW * cardScale, rowH * 0.88f)
+        val cardSide = maxCardByWidth * cardScale
         val cardRadius = cardSide * 0.18f
+        val rowGap = when {
+            narrow -> cardSide * 0.48f
+            wide -> cardSide * 0.54f
+            else -> cardSide * 0.50f
+        }
+        val rowStep = cardSide + rowGap
+        val contentH = weekH + cardSide + rowStep * (rowCount - 1)
+        val availableBelowHeader = h - gridTop - h * 0.055f
+        val compressedRowStep = if (contentH > availableBelowHeader && rowCount > 1) {
+            ((availableBelowHeader - weekH - cardSide) / (rowCount - 1)).coerceAtLeast(cardSide * 1.10f)
+        } else {
+            rowStep
+        }
+        val firstRowTop = gridTop + weekH + (availableBelowHeader - (weekH + cardSide + compressedRowStep * (rowCount - 1))).coerceAtLeast(0f) * 0.08f
 
         val weekdays = if (narrow) {
             listOf("M", "T", "W", "T", "F", "S", "S")
@@ -2423,22 +2432,31 @@ object AutoWallpaperGenerator {
         }
 
         for (r in 0 until rowCount) {
-            val y0 = gridTop + weekH + rowH * r
+            val y0 = firstRowTop + compressedRowStep * r
             for (col in 0 until 7) {
                 val idx = r * 7 + col
                 if (idx !in data.cells.indices) continue
                 val cell = data.cells[idx]
                 val x0 = gridLeft + colW * col
                 val cardLeft = x0 + (colW - cardSide) / 2f
-                val cardTop = y0 + (rowH - cardSide) / 2f
+                val cardTop = y0
                 val card = RectF(cardLeft, cardTop, cardLeft + cardSide, cardTop + cardSide)
                 val alpha = if (cell.inMonth) 255 else 62
-                cardPaint.color = if (cell.inMonth) cardFill else Color.argb(80, 253, 251, 246)
-                canvas.drawRoundRect(card, cardRadius, cardRadius, cardPaint)
-                canvas.drawRoundRect(card, cardRadius, cardRadius, if (cell.inMonth) cardStroke else noDataStroke)
-
-                dayPaint.color = if (col == 6) Color.argb(alpha, 200, 56, 48) else Color.argb(alpha, 42, 24, 22)
-                canvas.drawText(cell.dayOfMonth.toString(), card.left + cardSide * 0.11f, card.top + cardSide * 0.22f, dayPaint)
+                val book = if (cell.inMonth) cell.books.firstOrNull() else null
+                if (book?.bitmap != null) {
+                    drawRoundedFittedBitmap(canvas, book.bitmap, card, cardRadius, drawBorder = false)
+                    val shade = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.argb(46, 0, 0, 0)
+                        style = Paint.Style.FILL
+                    }
+                    canvas.drawRoundRect(card, cardRadius, cardRadius, shade)
+                } else if (book != null) {
+                    drawRoundedCalendarPlaceholder(canvas, card, book.title, bodyFace, cardRadius)
+                } else if (cell.inMonth) {
+                    cardPaint.color = Color.argb(if (cell.totalMs > 0L) 170 else 92, 253, 251, 246)
+                    canvas.drawRoundRect(card, cardRadius, cardRadius, cardPaint)
+                    canvas.drawRoundRect(card, cardRadius, cardRadius, if (cell.totalMs > 0L) cardStroke else noDataStroke)
+                }
 
                 if (data.showDaySourceLabel && cell.inMonth && (cell.totalMs > 0L || cell.books.isNotEmpty())) {
                     tinyPaint.color = when (cell.sourceKind) {
@@ -2454,45 +2472,25 @@ object AutoWallpaperGenerator {
                     canvas.drawText(sourceLabel, card.right - cardSide * 0.11f, card.top + cardSide * 0.19f, tinyPaint)
                 }
 
-                if (!cell.inMonth) continue
-                val book = cell.books.firstOrNull()
+                val dayText = cell.dayOfMonth.toString()
+                dayPaint.color = when {
+                    book != null -> Color.WHITE
+                    col == 6 -> Color.argb(alpha, 200, 56, 48)
+                    else -> Color.argb(alpha, 42, 24, 22)
+                }
+                val oldSize = dayPaint.textSize
+                val oldAlign = dayPaint.textAlign
                 if (book != null) {
-                    val coverH = cardSide * if (narrow) 0.48f else 0.50f
-                    val coverW = (coverH * 0.66f).coerceAtMost(cardSide * 0.52f)
-                    val coverTop = card.top + cardSide * if (narrow) 0.29f else 0.28f
-                    val cover = RectF(
-                        card.centerX() - coverW / 2f,
-                        coverTop,
-                        card.centerX() + coverW / 2f,
-                        coverTop + coverH
-                    )
-                    if (book.bitmap != null) {
-                        drawRoundedFittedBitmap(canvas, book.bitmap, cover, cardSide * 0.045f)
-                    } else {
-                        drawRoundedCalendarPlaceholder(canvas, cover, book.title, bodyFace, cardSide * 0.045f)
-                    }
-                } else if (cell.totalMs > 0L) {
-                    val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = Color.argb(90, 126, 105, 100)
-                        style = Paint.Style.FILL
-                    }
-                    canvas.drawCircle(card.centerX(), card.centerY() + cardSide * 0.06f, cardSide * 0.055f, dot)
+                    dayPaint.textSize = oldSize * 1.16f
+                    dayPaint.setShadowLayer(cardSide * 0.035f, 0f, cardSide * 0.012f, Color.argb(120, 0, 0, 0))
+                } else {
+                    dayPaint.clearShadowLayer()
                 }
-
-                if (cell.totalMs > 0L) {
-                    durationPaint.color = if (book != null) ink else muted
-                    val label = compactDuration(cell.totalMs)
-                    drawFittedText(
-                        canvas,
-                        label,
-                        card.right - cardSide * 0.10f,
-                        card.bottom - cardSide * 0.10f,
-                        durationPaint,
-                        cardSide * 0.78f,
-                        Paint.Align.RIGHT,
-                        0.72f
-                    )
-                }
+                val dayBase = card.centerY() - (dayPaint.descent() + dayPaint.ascent()) / 2f
+                canvas.drawText(dayText, card.centerX(), dayBase, dayPaint)
+                dayPaint.textSize = oldSize
+                dayPaint.textAlign = oldAlign
+                dayPaint.clearShadowLayer()
             }
         }
 
@@ -2577,12 +2575,19 @@ object AutoWallpaperGenerator {
         canvas.drawBitmap(bitmap, src, dst, null)
     }
 
-    private fun drawRoundedFittedBitmap(canvas: Canvas, bitmap: Bitmap, dst: RectF, radius: Float) {
+    private fun drawRoundedFittedBitmap(
+        canvas: Canvas,
+        bitmap: Bitmap,
+        dst: RectF,
+        radius: Float,
+        drawBorder: Boolean = true
+    ) {
         val path = Path().apply { addRoundRect(dst, radius, radius, Path.Direction.CW) }
         val save = canvas.save()
         canvas.clipPath(path)
         drawFittedBitmap(canvas, bitmap, dst)
         canvas.restoreToCount(save)
+        if (!drawBorder) return
         val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(90, 44, 34, 32)
             style = Paint.Style.STROKE
