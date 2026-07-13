@@ -15,8 +15,17 @@ object DiagnosticPackageExporter {
     fun export(context: Context): SafeLogStore.WriteResult {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val name = "ReadTrace_logs_$stamp.zip"
-        val bytes = buildZip(context)
-        return SafeLogStore.exportBytes(context, name, "application/zip", bytes)
+        val bytes = runCatching { buildZip(context) }
+            .getOrElse { buildFallbackZip(context, it) }
+        return runCatching { SafeLogStore.exportBytes(context, name, "application/zip", bytes) }
+            .getOrElse {
+                SafeLogStore.WriteResult(
+                    ok = false,
+                    path = "",
+                    detail = "DiagnosticPackageExport ${it.javaClass.simpleName}:${it.message.orEmpty().take(220)}",
+                    fallback = true
+                )
+            }
     }
 
     private fun buildZip(context: Context): ByteArray {
@@ -52,20 +61,26 @@ object DiagnosticPackageExporter {
             listOf(SafeLogStore.DEBUG_LOG_NAME, DebugEventLog.LOG_NAME, SafeLogStore.AUTO_REFRESH_LOG_NAME).forEach { name ->
                 append(name).append('\n')
                 SafeLogStore.candidates(context, name).forEach { file ->
-                    append("  ").append(file.absolutePath)
-                        .append(" exists=").append(file.exists())
-                        .append(" bytes=").append(if (file.exists()) file.length() else 0L)
-                        .append('\n')
+                    appendFileSummary(file)
                 }
             }
             append("wallpaperCandidates").append('\n')
             wallpaperCandidates(context).forEach { file ->
-                append("  ").append(file.absolutePath)
-                    .append(" exists=").append(file.exists())
-                    .append(" bytes=").append(if (file.exists()) file.length() else 0L)
-                    .append('\n')
+                appendFileSummary(file)
             }
         }
+    }
+
+    private fun StringBuilder.appendFileSummary(file: File) {
+        append("  ").append(file.absolutePath)
+        runCatching {
+            val exists = file.exists()
+            append(" exists=").append(exists)
+            append(" bytes=").append(if (exists) file.length() else 0L)
+        }.onFailure {
+            append(" error=").append(it.javaClass.simpleName).append(':').append(it.message.orEmpty().take(160))
+        }
+        append('\n')
     }
 
     private fun wallpaperCandidates(context: Context): List<File> {
@@ -77,19 +92,44 @@ object DiagnosticPackageExporter {
     }
 
     private fun addFirstExisting(zip: ZipOutputStream, entryName: String, files: List<File>) {
-        val file = files.firstOrNull { it.exists() && it.isFile && it.length() > 0L }
+        val errors = mutableListOf<String>()
+        val file = files.firstOrNull { candidate ->
+            runCatching { candidate.exists() && candidate.isFile && candidate.length() > 0L }
+                .getOrElse {
+                    errors += "${candidate.absolutePath} ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+                    false
+                }
+        }
         if (file == null) {
-            addText(zip, "$entryName.missing.txt", "未找到 $entryName\n候选路径：\n${files.joinToString("\n") { it.absolutePath }}\n")
+            addText(
+                zip,
+                "$entryName.missing.txt",
+                "未找到 $entryName\n候选路径：\n${files.joinToString("\n") { it.absolutePath }}\n错误：\n${errors.joinToString("\n").ifBlank { "<none>" }}\n"
+            )
             return
         }
-        zip.putNextEntry(ZipEntry(entryName))
-        file.inputStream().use { it.copyTo(zip) }
-        zip.closeEntry()
+        runCatching {
+            zip.putNextEntry(ZipEntry(entryName))
+            file.inputStream().use { it.copyTo(zip) }
+            zip.closeEntry()
+        }.onFailure {
+            runCatching { zip.closeEntry() }
+            addText(zip, "$entryName.error.txt", "读取失败：${file.absolutePath}\n${it.javaClass.simpleName}:${it.message.orEmpty().take(240)}\n")
+        }
     }
 
     private fun addText(zip: ZipOutputStream, entryName: String, text: String) {
         zip.putNextEntry(ZipEntry(entryName))
         zip.write(text.toByteArray(Charsets.UTF_8))
         zip.closeEntry()
+    }
+
+    private fun buildFallbackZip(context: Context, error: Throwable): ByteArray {
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { zip ->
+            addText(zip, "device_info.txt", runCatching { deviceInfo(context) }.getOrElse { "device_info failed: ${it.javaClass.simpleName}:${it.message}\n" })
+            addText(zip, "export_error.txt", "${error.javaClass.simpleName}:${error.message.orEmpty().take(500)}\n")
+        }
+        return out.toByteArray()
     }
 }
