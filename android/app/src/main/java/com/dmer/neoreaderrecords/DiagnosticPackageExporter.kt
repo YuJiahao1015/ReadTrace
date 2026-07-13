@@ -94,7 +94,7 @@ object DiagnosticPackageExporter {
         val ordered = if (DevicePlatform.isBooxDevice()) {
             publicCandidates + appCandidates
         } else {
-            appCandidates + publicCandidates
+            appCandidates
         }
         return ordered.distinctBy { it.absolutePath }
     }
