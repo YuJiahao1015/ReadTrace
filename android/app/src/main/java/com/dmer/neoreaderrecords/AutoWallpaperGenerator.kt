@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.pdf.PdfRenderer
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -119,6 +120,7 @@ object AutoWallpaperGenerator {
         val sourceMode: String,
         val wallpaperMode: String,
         val statsTemplate: String,
+        val calendarTemplate: String,
         val calendarStackOrder: String,
         val coverFitMode: String,
         val progressMode: String,
@@ -465,7 +467,7 @@ object AutoWallpaperGenerator {
         }
         return PreviewResult(
             bmp,
-            "混合月历 month=${calendarTitleLabel(data, s)} source=$source stackOrder=${s.calendarStackOrder} localDays=$localDays weReadDays=$weReadDays mixedDays=$mixedDays records=${data.matchedRows} 输出=${canvasSizeText(s)}"
+            "混合月历 month=${calendarTitleLabel(data, s)} template=${s.calendarTemplate} source=$source stackOrder=${s.calendarStackOrder} localDays=$localDays weReadDays=$weReadDays mixedDays=$mixedDays records=${data.matchedRows} 输出=${canvasSizeText(s)}"
         )
     }
 
@@ -689,7 +691,7 @@ object AutoWallpaperGenerator {
         val coveredDays = data.cells.count { it.inMonth && it.books.isNotEmpty() }
         return PreviewResult(
             bmp,
-            "月历封面墙 month=$monthLabel stackOrder=${s.calendarStackOrder} daysWithCover=$coveredDays rows=${data.statsRows} matched=${data.matchedRows} unmatched=${data.unmatchedRows} 输出=${canvasSizeText(s)}"
+            "月历封面墙 month=$monthLabel template=${s.calendarTemplate} stackOrder=${s.calendarStackOrder} daysWithCover=$coveredDays rows=${data.statsRows} matched=${data.matchedRows} unmatched=${data.unmatchedRows} 输出=${canvasSizeText(s)}"
         )
     }
 
@@ -719,7 +721,7 @@ object AutoWallpaperGenerator {
         }
         return PreviewResult(
             bmp,
-            "微信读书月历 month=${calendarTitleLabel(data, s)} source=$source stackOrder=${s.calendarStackOrder} activeDays=$activeDays daysWithCover=$coveredDays records=${data.matchedRows} 输出=${canvasSizeText(s)}"
+            "微信读书月历 month=${calendarTitleLabel(data, s)} template=${s.calendarTemplate} source=$source stackOrder=${s.calendarStackOrder} activeDays=$activeDays daysWithCover=$coveredDays records=${data.matchedRows} 输出=${canvasSizeText(s)}"
         )
     }
 
@@ -2130,6 +2132,14 @@ object AutoWallpaperGenerator {
     }
 
     private fun drawCalendarWallpaper(context: Context, data: CalendarBuildData, s: AutoSettings, sourceMark: String): Bitmap {
+        return if (s.calendarTemplate == "ROUNDED_CARD") {
+            drawRoundedCardCalendarWallpaper(context, data, s, sourceMark)
+        } else {
+            drawClassicCalendarWallpaper(context, data, s, sourceMark)
+        }
+    }
+
+    private fun drawClassicCalendarWallpaper(context: Context, data: CalendarBuildData, s: AutoSettings, sourceMark: String): Bitmap {
         val size = resolveWallpaperSize(s)
         val w = size.width
         val h = size.height
@@ -2297,6 +2307,199 @@ object AutoWallpaperGenerator {
         return out
     }
 
+    private fun drawRoundedCardCalendarWallpaper(context: Context, data: CalendarBuildData, s: AutoSettings, sourceMark: String): Bitmap {
+        val size = resolveWallpaperSize(s)
+        val w = size.width
+        val h = size.height
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val bg = Color.rgb(247, 242, 234)
+        val cardFill = Color.rgb(253, 251, 246)
+        val ink = Color.rgb(34, 22, 20)
+        val muted = Color.rgb(126, 105, 100)
+        val accent = Color.rgb(185, 66, 58)
+        canvas.drawColor(bg)
+
+        val titleFace = resolveTypeface(context, s.titleFont, true)
+        val bodyFace = resolveTypeface(context, s.bodyFont, false)
+        val aspect = w / h.toFloat()
+        val narrow = aspect < 0.68f
+        val wide = aspect > 0.82f
+        val marginX = w * if (narrow) 0.045f else 0.055f
+        val top = h * if (narrow) 0.028f else 0.034f
+
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = muted
+            textSize = (w * if (narrow) 0.078f else 0.072f).coerceIn(48f, 116f)
+            typeface = Typeface.create(titleFace, Typeface.BOLD)
+        }
+        val summaryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = muted
+            textSize = (w * if (narrow) 0.027f else 0.024f).coerceIn(20f, 38f)
+            typeface = Typeface.create(bodyFace, Typeface.BOLD)
+            textAlign = Paint.Align.RIGHT
+        }
+        val weekPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = muted
+            textSize = (w * if (narrow) 0.028f else 0.026f).coerceIn(20f, 40f)
+            typeface = Typeface.create(bodyFace, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val dayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ink
+            textSize = (w * if (narrow) 0.037f else 0.032f).coerceIn(24f, 48f)
+            typeface = Typeface.create(bodyFace, Typeface.BOLD)
+        }
+        val durationPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ink
+            textSize = (w * if (narrow) 0.026f else 0.021f).coerceIn(17f, 32f)
+            typeface = Typeface.create(bodyFace, Typeface.BOLD)
+            textAlign = Paint.Align.RIGHT
+        }
+        val tinyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = muted
+            textSize = (w * if (narrow) 0.019f else 0.016f).coerceIn(13f, 24f)
+            typeface = Typeface.create(bodyFace, Typeface.NORMAL)
+            textAlign = Paint.Align.RIGHT
+        }
+        val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = cardFill
+            style = Paint.Style.FILL
+        }
+        val cardStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(80, 84, 66, 62)
+            style = Paint.Style.STROKE
+            strokeWidth = (w * 0.0012f).coerceIn(1f, 2.2f)
+        }
+        val noDataStroke = Paint(cardStroke).apply {
+            color = Color.argb(42, 84, 66, 62)
+        }
+
+        val monthText = calendarTitleLabel(data, s)
+        canvas.drawText(monthText, marginX, top + titlePaint.textSize, titlePaint)
+
+        val inMonthCells = data.cells.filter { it.inMonth }
+        val totalDuration = inMonthCells.sumOf { it.totalMs }
+        val activeDays = inMonthCells.count { it.totalMs > 0L }
+        val coveredDays = inMonthCells.count { it.books.isNotEmpty() }
+        val uniqueBooks = inMonthCells.flatMap { it.books }.distinctBy { calendarBookIdentity(it.title) }
+        val avg = if (activeDays > 0) totalDuration / activeDays else 0L
+        val summaryRight = w - marginX
+        canvas.drawText("总时长 ${compactDuration(totalDuration)}", summaryRight, top + titlePaint.textSize * 0.50f, summaryPaint)
+        if (!narrow) {
+            summaryPaint.typeface = Typeface.create(bodyFace, Typeface.NORMAL)
+            canvas.drawText("日均 ${compactDuration(avg)} · ${activeDays}天记录", summaryRight, top + titlePaint.textSize * 0.84f, summaryPaint)
+            canvas.drawText("读过${uniqueBooks.size}本 · ${coveredDays}天封面", summaryRight, top + titlePaint.textSize * 1.18f, summaryPaint)
+        } else {
+            summaryPaint.typeface = Typeface.create(bodyFace, Typeface.NORMAL)
+            canvas.drawText("${activeDays}天 · ${uniqueBooks.size}本", summaryRight, top + titlePaint.textSize * 0.88f, summaryPaint)
+        }
+
+        val gridLeft = marginX
+        val gridRight = w - marginX
+        val gridWidth = gridRight - gridLeft
+        val gridTop = top + titlePaint.textSize + h * if (narrow) 0.032f else 0.04f
+        val weekH = (h * if (narrow) 0.035f else 0.042f).coerceIn(34f, 64f)
+        val gridBottom = h - h * if (narrow) 0.038f else 0.048f
+        val rowCount = data.weekRows
+        val rowH = ((gridBottom - gridTop - weekH) / rowCount.toFloat()).coerceAtLeast(78f)
+        val colW = gridWidth / 7f
+        val cardScale = when {
+            narrow -> 0.88f
+            wide -> 0.82f
+            else -> 0.86f
+        }
+        val cardSide = minOf(colW * cardScale, rowH * 0.88f)
+        val cardRadius = cardSide * 0.18f
+
+        val weekdays = if (narrow) {
+            listOf("M", "T", "W", "T", "F", "S", "S")
+        } else {
+            listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        }
+        weekdays.forEachIndexed { i, label ->
+            weekPaint.color = if (i == 6) accent else muted
+            canvas.drawText(label, gridLeft + colW * (i + 0.5f), gridTop + weekH * 0.62f, weekPaint)
+        }
+
+        for (r in 0 until rowCount) {
+            val y0 = gridTop + weekH + rowH * r
+            for (col in 0 until 7) {
+                val idx = r * 7 + col
+                if (idx !in data.cells.indices) continue
+                val cell = data.cells[idx]
+                val x0 = gridLeft + colW * col
+                val cardLeft = x0 + (colW - cardSide) / 2f
+                val cardTop = y0 + (rowH - cardSide) / 2f
+                val card = RectF(cardLeft, cardTop, cardLeft + cardSide, cardTop + cardSide)
+                val alpha = if (cell.inMonth) 255 else 62
+                cardPaint.color = if (cell.inMonth) cardFill else Color.argb(80, 253, 251, 246)
+                canvas.drawRoundRect(card, cardRadius, cardRadius, cardPaint)
+                canvas.drawRoundRect(card, cardRadius, cardRadius, if (cell.inMonth) cardStroke else noDataStroke)
+
+                dayPaint.color = if (col == 6) Color.argb(alpha, 200, 56, 48) else Color.argb(alpha, 42, 24, 22)
+                canvas.drawText(cell.dayOfMonth.toString(), card.left + cardSide * 0.11f, card.top + cardSide * 0.22f, dayPaint)
+
+                if (data.showDaySourceLabel && cell.inMonth && (cell.totalMs > 0L || cell.books.isNotEmpty())) {
+                    tinyPaint.color = when (cell.sourceKind) {
+                        "WEREAD" -> Color.rgb(47, 105, 76)
+                        "MIXED" -> accent
+                        else -> muted
+                    }
+                    val sourceLabel = when (cell.sourceKind) {
+                        "WEREAD" -> "W"
+                        "MIXED" -> "M"
+                        else -> "N"
+                    }
+                    canvas.drawText(sourceLabel, card.right - cardSide * 0.11f, card.top + cardSide * 0.19f, tinyPaint)
+                }
+
+                if (!cell.inMonth) continue
+                val book = cell.books.firstOrNull()
+                if (book != null) {
+                    val coverH = cardSide * if (narrow) 0.48f else 0.50f
+                    val coverW = (coverH * 0.66f).coerceAtMost(cardSide * 0.52f)
+                    val coverTop = card.top + cardSide * if (narrow) 0.29f else 0.28f
+                    val cover = RectF(
+                        card.centerX() - coverW / 2f,
+                        coverTop,
+                        card.centerX() + coverW / 2f,
+                        coverTop + coverH
+                    )
+                    if (book.bitmap != null) {
+                        drawRoundedFittedBitmap(canvas, book.bitmap, cover, cardSide * 0.045f)
+                    } else {
+                        drawRoundedCalendarPlaceholder(canvas, cover, book.title, bodyFace, cardSide * 0.045f)
+                    }
+                } else if (cell.totalMs > 0L) {
+                    val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.argb(90, 126, 105, 100)
+                        style = Paint.Style.FILL
+                    }
+                    canvas.drawCircle(card.centerX(), card.centerY() + cardSide * 0.06f, cardSide * 0.055f, dot)
+                }
+
+                if (cell.totalMs > 0L) {
+                    durationPaint.color = if (book != null) ink else muted
+                    val label = compactDuration(cell.totalMs)
+                    drawFittedText(
+                        canvas,
+                        label,
+                        card.right - cardSide * 0.10f,
+                        card.bottom - cardSide * 0.10f,
+                        durationPaint,
+                        cardSide * 0.78f,
+                        Paint.Align.RIGHT,
+                        0.72f
+                    )
+                }
+            }
+        }
+
+        drawSourceCornerMark(canvas, w, h, sourceMark, 1f)
+        return out
+    }
+
     private fun calendarTitleLabel(data: CalendarBuildData, s: AutoSettings): String {
         return if (s.periodMode == "LAST_30_DAYS") {
             val fmt = SimpleDateFormat("M/d", Locale.US)
@@ -2374,6 +2577,43 @@ object AutoWallpaperGenerator {
         canvas.drawBitmap(bitmap, src, dst, null)
     }
 
+    private fun drawRoundedFittedBitmap(canvas: Canvas, bitmap: Bitmap, dst: RectF, radius: Float) {
+        val path = Path().apply { addRoundRect(dst, radius, radius, Path.Direction.CW) }
+        val save = canvas.save()
+        canvas.clipPath(path)
+        drawFittedBitmap(canvas, bitmap, dst)
+        canvas.restoreToCount(save)
+        val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(90, 44, 34, 32)
+            style = Paint.Style.STROKE
+            strokeWidth = (dst.width() * 0.018f).coerceIn(1f, 2.4f)
+        }
+        canvas.drawRoundRect(dst, radius, radius, border)
+    }
+
+    private fun drawRoundedCalendarPlaceholder(canvas: Canvas, rect: RectF, title: String, bodyFace: Typeface, radius: Float) {
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(246, 243, 238)
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(rect, radius, radius, fill)
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(76, 60, 56)
+            textSize = (rect.width() * 0.18f).coerceIn(11f, 22f)
+            typeface = Typeface.create(bodyFace, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val short = shortTitle(title, 4)
+        val base = rect.centerY() - (text.descent() + text.ascent()) / 2f
+        canvas.drawText(short, rect.centerX(), base, text)
+        val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(70, 44, 34, 32)
+            style = Paint.Style.STROKE
+            strokeWidth = 1.2f
+        }
+        canvas.drawRoundRect(rect, radius, radius, border)
+    }
+
     private fun drawCalendarPlaceholder(canvas: Canvas, rect: RectF, title: String, bodyFace: Typeface) {
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -2419,6 +2659,7 @@ object AutoWallpaperGenerator {
             sourceMode = p.getString("source_mode", "DURATION") ?: "DURATION",
             wallpaperMode = p.getString("wallpaper_mode", "STATS") ?: "STATS",
             statsTemplate = p.getString("stats_template", "RECEIPT") ?: "RECEIPT",
+            calendarTemplate = p.getString("calendar_template", "CLASSIC") ?: "CLASSIC",
             calendarStackOrder = p.getString("calendar_stack_order", "LONGEST_TOP") ?: "LONGEST_TOP",
             coverFitMode = p.getString("cover_fit_mode", "FIT") ?: "FIT",
             progressMode = p.getString("progress_mode", "PAGES") ?: "PAGES",

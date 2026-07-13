@@ -91,6 +91,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var timeUnitGroup: RadioGroup
     private lateinit var wallpaperModeGroup: RadioGroup
     private lateinit var statsTemplateGroup: RadioGroup
+    private lateinit var calendarTemplateGroup: RadioGroup
     private lateinit var calendarStackOrderGroup: RadioGroup
     private lateinit var booxDevicePresetGroup: RadioGroup
     private lateinit var coverFitModeGroup: RadioGroup
@@ -211,6 +212,7 @@ class MainActivity : ComponentActivity() {
         val sourceMode: DataSourceMode,
         val wallpaperMode: String,
         val statsTemplate: String,
+        val calendarTemplate: String,
         val calendarStackOrder: String,
         val coverFitMode: String,
         val progressMode: String,
@@ -1091,6 +1093,22 @@ class MainActivity : ComponentActivity() {
         val statsTemplateNames = listOf("RECEIPT", "EXCERPT_MENU", "READING_MENU")
         statsTemplateGroup = makeRadioGroup(statsTemplateOptions, selectedId(prefs.getString("stats_template", "RECEIPT") ?: "RECEIPT", 1241, statsTemplateOptions, statsTemplateNames), RadioGroup.VERTICAL)
 
+        val calendarTemplateOptions = listOf(
+            1231 to "经典封面墙\n多封面堆叠",
+            1232 to "圆角卡片\n单封面方格"
+        )
+        val calendarTemplateNames = listOf("CLASSIC", "ROUNDED_CARD")
+        calendarTemplateGroup = makeRadioGroup(
+            calendarTemplateOptions,
+            selectedId(
+                prefs.getString("calendar_template", "CLASSIC") ?: "CLASSIC",
+                1231,
+                calendarTemplateOptions,
+                calendarTemplateNames
+            ),
+            RadioGroup.VERTICAL
+        )
+
         val calendarStackOrderOptions = listOf(
             1221 to "阅读最长在最上\n突出当天主要阅读",
             1222 to "阅读最短在最上\n突出短时翻阅书籍",
@@ -1299,6 +1317,8 @@ class MainActivity : ComponentActivity() {
             isVertical = true
         )
         val calendarStackOrderHint = addHint("说明：控制每日封面堆叠中最上方显示哪本书；最多仍显示4本，不改变每日阅读时长统计。")
+        val calendarTemplateSegment = bindSegmented("月历模板", calendarTemplateGroup, calendarTemplateOptions, isVertical = true)
+        val calendarTemplateHint = addHint("说明：经典封面墙会堆叠多本封面；圆角卡片只显示当天排序第一本书，优先保证格子整齐和小屏可读。")
         val coverFitSegment = bindSegmented("封面显示方式", coverFitModeGroup, coverFitOptions, isVertical = false)
         val timeUnitSegment = bindSegmented("时长显示单位", timeUnitGroup, timeUnitOptions, isVertical = false)
         addHint("说明：小时模式更适合壁纸阅读，分钟模式更适合精确核对。")
@@ -1549,6 +1569,8 @@ class MainActivity : ComponentActivity() {
             excerptSourceHint.visibility = if (noteTemplateVisible) View.VISIBLE else View.GONE
             bookNoteRows.forEach { it.visibility = if (noteTemplateVisible && bookNoteModeGroup.checkedRadioButtonId != 3201) View.VISIBLE else View.GONE }
             val calendarVisible = wallpaperModeGroup.checkedRadioButtonId == 1204
+            calendarTemplateSegment.visibility = if (calendarVisible) View.VISIBLE else View.GONE
+            calendarTemplateHint.visibility = if (calendarVisible) View.VISIBLE else View.GONE
             calendarStackOrderSegment.visibility = if (calendarVisible) View.VISIBLE else View.GONE
             calendarStackOrderHint.visibility = if (calendarVisible) View.VISIBLE else View.GONE
 
@@ -1600,6 +1622,7 @@ class MainActivity : ComponentActivity() {
         footerNoteSourceGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
         excerptSourceModeGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
         footerShowBookTitleCheck.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
+        calendarTemplateGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
         calendarStackOrderGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
         booxDevicePresetGroup.setOnCheckedChangeListener { _, _ ->
             updateConditionalVisibility()
@@ -2700,6 +2723,10 @@ class MainActivity : ComponentActivity() {
             1243 -> "READING_MENU"
             else -> "RECEIPT"
         }
+        val calendarTemplate = when (calendarTemplateGroup.checkedRadioButtonId) {
+            1232 -> "ROUNDED_CARD"
+            else -> "CLASSIC"
+        }
         val calendarStackOrder = when (calendarStackOrderGroup.checkedRadioButtonId) {
             1222 -> "SHORTEST_TOP"
             1223 -> "LATEST_TOP"
@@ -2776,7 +2803,7 @@ class MainActivity : ComponentActivity() {
         }
         val titleFont = fontSpec(titleFontSpinner.selectedItem?.toString() ?: "SERIF_BOLD")
         val bodyFont = fontSpec(bodyFontSpinner.selectedItem?.toString() ?: "MONO")
-        return Settings(includeUnread, showChart, showProgressStatus, showAuthor, showBookDuration, minDurationMinutes, topN, weekStart, weekEnd, periodMode, readingFilterMode, sourceMode, wallpaperMode, statsTemplate, calendarStackOrder, coverFitMode, progressMode, timeUnit, receiptTitle, receiptTitleSize, receiptBodySize, serialNumberMode, serialNumberCustom, serialNumberSize, booxDevicePreset, customWallpaperWidth, customWallpaperHeight, footerMode, barcodeWidthScale, barcodeGapMode, noteText, bookNoteMode, footerNoteSource, footerShowBookTitleCheck.isChecked, excerptSourceMode, chartStyleMode, showPeakLabel, yAxisMode, yAxisFixedMaxMinutes, titleFont, bodyFont)
+        return Settings(includeUnread, showChart, showProgressStatus, showAuthor, showBookDuration, minDurationMinutes, topN, weekStart, weekEnd, periodMode, readingFilterMode, sourceMode, wallpaperMode, statsTemplate, calendarTemplate, calendarStackOrder, coverFitMode, progressMode, timeUnit, receiptTitle, receiptTitleSize, receiptBodySize, serialNumberMode, serialNumberCustom, serialNumberSize, booxDevicePreset, customWallpaperWidth, customWallpaperHeight, footerMode, barcodeWidthScale, barcodeGapMode, noteText, bookNoteMode, footerNoteSource, footerShowBookTitleCheck.isChecked, excerptSourceMode, chartStyleMode, showPeakLabel, yAxisMode, yAxisFixedMaxMinutes, titleFont, bodyFont)
     }
 
     private fun saveSettings(settings: Settings) {
@@ -2796,6 +2823,7 @@ class MainActivity : ComponentActivity() {
             .putString("source_mode", settings.sourceMode.name)
             .putString("wallpaper_mode", settings.wallpaperMode)
             .putString("stats_template", settings.statsTemplate)
+            .putString("calendar_template", settings.calendarTemplate)
             .putString("calendar_stack_order", settings.calendarStackOrder)
             .putString("cover_fit_mode", settings.coverFitMode)
             .putString("progress_mode", settings.progressMode)
@@ -3049,6 +3077,7 @@ class MainActivity : ComponentActivity() {
                     .append(", sourceMode=").append(s.sourceMode.name)
                     .append(", wallpaperMode=").append(s.wallpaperMode)
                     .append(", statsTemplate=").append(s.statsTemplate)
+                    .append(", calendarTemplate=").append(s.calendarTemplate)
                     .append(", coverFitMode=").append(s.coverFitMode)
                     .append(", progressMode=").append(s.progressMode)
                     .append(", timeUnit=").append(s.timeUnit)
