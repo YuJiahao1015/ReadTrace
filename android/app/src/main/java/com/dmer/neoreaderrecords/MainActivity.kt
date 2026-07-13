@@ -93,6 +93,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var timeUnitGroup: RadioGroup
     private lateinit var wallpaperModeGroup: RadioGroup
     private lateinit var statsTemplateGroup: RadioGroup
+    private lateinit var calendarTemplateGroup: RadioGroup
+    private lateinit var calendarFeatureBookRuleGroup: RadioGroup
     private lateinit var calendarStackOrderGroup: RadioGroup
     private lateinit var booxDevicePresetGroup: RadioGroup
     private lateinit var coverFitModeGroup: RadioGroup
@@ -120,6 +122,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var wereadApiKeyInput: EditText
     private lateinit var wereadStatsModeGroup: RadioGroup
     private lateinit var wereadStatusText: TextView
+    private lateinit var wallpaperSaveLocationText: TextView
     private lateinit var pickFontDirBtn: Button
     private lateinit var titleFontSpinner: Spinner
     private lateinit var bodyFontSpinner: Spinner
@@ -159,6 +162,7 @@ class MainActivity : ComponentActivity() {
     private var lastBooxReadingStateAutoProbeMs: Long = 0L
     private var currentDevicePresetOptions: List<BooxDevicePreset> = BooxDevicePresets.boox
     private var selectedFontDirUri: String? = null
+    private var selectedWallpaperDirUri: String? = null
 
     private val pickFontTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -177,7 +181,43 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val pickWallpaperTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            try {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                selectedWallpaperDirUri = uri.toString()
+                getSharedPreferences(AutoRefreshConfig.PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(WallpaperFileStore.PREF_KEY_CUSTOM_TREE_URI, selectedWallpaperDirUri)
+                    .apply()
+                appendUiDebug("wallpaper save tree selected uri=$uri")
+                if (::wallpaperSaveLocationText.isInitialized) wallpaperSaveLocationText.text = wallpaperSaveLocationSummary()
+                writeDebugLog("wallpaper_save_tree_selected")
+            } catch (e: Exception) {
+                appendUiDebug("wallpaper save tree permission failed ${e.javaClass.simpleName}:${e.message}")
+                if (::statusText.isInitialized) {
+                    statusText.text = "保存目录授权失败：${e.message ?: e.javaClass.simpleName}"
+                }
+            }
+        }
+    }
+
     data class BookItem(val title: String, val author: String?, val progress: String?, val status: Int, val path: String?)
+    private data class UiReadingRecord(
+        val scope: String,
+        val date: String,
+        val source: String,
+        val bookKey: String,
+        val title: String,
+        val author: String?,
+        val durationMs: Long,
+        val progress: String?,
+        val status: Int,
+        val confidence: String
+    )
     private data class CalendarMetaBook(
         val path: String,
         val title: String,
@@ -217,6 +257,8 @@ class MainActivity : ComponentActivity() {
         val sourceMode: DataSourceMode,
         val wallpaperMode: String,
         val statsTemplate: String,
+        val calendarTemplate: String,
+        val calendarFeatureBookRule: String,
         val calendarStackOrder: String,
         val coverFitMode: String,
         val progressMode: String,
@@ -264,6 +306,19 @@ class MainActivity : ComponentActivity() {
 
     private fun storagePermissionSummary(): String {
         return StoragePermissionHelper.summary(this)
+    }
+
+    private fun wallpaperSaveLocationSummary(): String {
+        val uri = getSharedPreferences(AutoRefreshConfig.PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(WallpaperFileStore.PREF_KEY_CUSTOM_TREE_URI, "")
+            .orEmpty()
+            .trim()
+        selectedWallpaperDirUri = uri.takeIf { it.isNotBlank() }
+        return if (uri.isBlank()) {
+            "壁纸保存位置：默认 Pictures/NeoReader/neoreader_wallpaper.png"
+        } else {
+            "壁纸保存位置：自定义目录/neoreader_wallpaper.png\n$uri"
+        }
     }
 
     private fun isCompactPhoneUi(): Boolean {
@@ -1135,6 +1190,38 @@ class MainActivity : ComponentActivity() {
         val statsTemplateNames = listOf("RECEIPT", "EXCERPT_MENU", "READING_MENU")
         statsTemplateGroup = makeRadioGroup(statsTemplateOptions, selectedId(prefs.getString("stats_template", "RECEIPT") ?: "RECEIPT", 1241, statsTemplateOptions, statsTemplateNames), RadioGroup.VERTICAL)
 
+        val calendarTemplateOptions = listOf(
+            1231 to "经典封面墙\n多封面堆叠",
+            1232 to "圆角卡片\n单封面方格"
+        )
+        val calendarTemplateNames = listOf("CLASSIC", "ROUNDED_CARD")
+        calendarTemplateGroup = makeRadioGroup(
+            calendarTemplateOptions,
+            selectedId(
+                prefs.getString("calendar_template", "CLASSIC") ?: "CLASSIC",
+                1231,
+                calendarTemplateOptions,
+                calendarTemplateNames
+            ),
+            RadioGroup.VERTICAL
+        )
+
+        val calendarFeatureBookRuleOptions = listOf(
+            1233 to "阅读最久\n显示本期主要阅读",
+            1234 to "最近阅读\n显示最后打开的书"
+        )
+        val calendarFeatureBookRuleNames = listOf("LONGEST", "LATEST")
+        calendarFeatureBookRuleGroup = makeRadioGroup(
+            calendarFeatureBookRuleOptions,
+            selectedId(
+                prefs.getString("calendar_feature_book_rule", "LONGEST") ?: "LONGEST",
+                1233,
+                calendarFeatureBookRuleOptions,
+                calendarFeatureBookRuleNames
+            ),
+            RadioGroup.VERTICAL
+        )
+
         val calendarStackOrderOptions = listOf(
             1221 to "阅读最长在最上\n突出当天主要阅读",
             1222 to "阅读最短在最上\n突出短时翻阅书籍",
@@ -1336,6 +1423,10 @@ class MainActivity : ComponentActivity() {
         }
         val excerptSourceSegment = bindSegmented("微信摘录策略", excerptSourceModeGroup, excerptSourceOptions, isVertical = true)
         val excerptSourceHint = addHint("说明：仅我的内容=个人批注和个人划线；热门补充=个人内容为空时才用热门划线；只看热门=不显示个人内容；有啥显示啥=个人优先，其次热门。")
+        val calendarTemplateSegment = bindSegmented("月历模板", calendarTemplateGroup, calendarTemplateOptions, isVertical = true)
+        val calendarTemplateHint = addHint("说明：经典封面墙会堆叠多本封面；圆角卡片只显示当天排序第一本书，优先保证格子整齐和小屏可读。")
+        val calendarFeatureBookRuleSegment = bindSegmented("月历主书", calendarFeatureBookRuleGroup, calendarFeatureBookRuleOptions, isVertical = true)
+        val calendarFeatureBookRuleHint = addHint("说明：圆角卡片模板会在底部空间足够时显示一本主书；空间不足时自动隐藏批注或整张主书卡片。")
         val calendarStackOrderSegment = bindSegmented(
             "月历封面堆叠顺序",
             calendarStackOrderGroup,
@@ -1514,6 +1605,36 @@ class MainActivity : ComponentActivity() {
             setPadding(0, 0, 0, 16)
             root.addView(this)
         }
+        wallpaperSaveLocationText = TextView(this).apply {
+            text = wallpaperSaveLocationSummary()
+            textSize = if (compactUi) 12f else 13f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 0, 0, 16)
+            root.addView(this)
+        }
+        val wallpaperSaveButtons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, 12)
+        }
+        wallpaperSaveButtons.addView(Button(this).apply {
+            text = "选择壁纸保存目录"
+            setOnClickListener { pickWallpaperTreeLauncher.launch(null) }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(0, 0, 12, 0) })
+        wallpaperSaveButtons.addView(Button(this).apply {
+            text = "恢复默认"
+            setOnClickListener {
+                selectedWallpaperDirUri = null
+                getSharedPreferences(AutoRefreshConfig.PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .remove(WallpaperFileStore.PREF_KEY_CUSTOM_TREE_URI)
+                    .apply()
+                wallpaperSaveLocationText.text = wallpaperSaveLocationSummary()
+                appendUiDebug("wallpaper save tree cleared")
+                writeDebugLog("wallpaper_save_tree_cleared")
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        root.addView(wallpaperSaveButtons)
+        addHint("说明：选择目录后，手动生成和自动刷新会优先覆盖保存到该目录下的 neoreader_wallpaper.png；如果授权失效，会自动回退到默认 Pictures/NeoReader。")
         root.addView(Button(this).apply {
             text = "授权公共目录访问"
             setOnClickListener {
@@ -1558,6 +1679,11 @@ class MainActivity : ComponentActivity() {
             text = "导出诊断包"
             setOnClickListener { exportDiagnosticPackage() }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
+        root.addView(Button(this).apply {
+            text = "管理阅读记录"
+            setOnClickListener { showReadingRecordManager() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 12) })
+        addHint("说明：可分页查看并删除 App 自己落库的 NEO/微信日级记录；Neo 本地原始记录会尝试通过系统 ContentProvider 删除，失败时说明当前设备不允许删除。微信读书线上记录不由本 App 管理。")
         addHint("说明：App 只检查并跳转 GitHub Release 页面，不会自动下载或安装 APK。")
         updateReleaseStatusFromCache()
 
@@ -1604,6 +1730,11 @@ class MainActivity : ComponentActivity() {
             excerptSourceHint.visibility = if (noteTemplateVisible) View.VISIBLE else View.GONE
             bookNoteRows.forEach { it.visibility = if (noteTemplateVisible && bookNoteModeGroup.checkedRadioButtonId != 3201) View.VISIBLE else View.GONE }
             val calendarVisible = wallpaperModeGroup.checkedRadioButtonId == 1204
+            calendarTemplateSegment.visibility = if (calendarVisible) View.VISIBLE else View.GONE
+            calendarTemplateHint.visibility = if (calendarVisible) View.VISIBLE else View.GONE
+            val roundedCalendar = calendarVisible && calendarTemplateGroup.checkedRadioButtonId == 1232
+            calendarFeatureBookRuleSegment.visibility = if (roundedCalendar) View.VISIBLE else View.GONE
+            calendarFeatureBookRuleHint.visibility = if (roundedCalendar) View.VISIBLE else View.GONE
             calendarStackOrderSegment.visibility = if (calendarVisible) View.VISIBLE else View.GONE
             calendarStackOrderHint.visibility = if (calendarVisible) View.VISIBLE else View.GONE
 
@@ -1655,6 +1786,8 @@ class MainActivity : ComponentActivity() {
         footerNoteSourceGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
         excerptSourceModeGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
         footerShowBookTitleCheck.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
+        calendarTemplateGroup.setOnCheckedChangeListener { _, _ -> updateConditionalVisibility(); if (!isInitializingUi) applySettingsPreview() }
+        calendarFeatureBookRuleGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
         calendarStackOrderGroup.setOnCheckedChangeListener { _, _ -> if (!isInitializingUi) applySettingsPreview() }
         booxDevicePresetGroup.setOnCheckedChangeListener { _, _ ->
             updateConditionalVisibility()
@@ -2032,6 +2165,270 @@ class MainActivity : ComponentActivity() {
             bytes >= 1024L -> String.format(Locale.US, "%.1f KB", bytes / 1024f)
             else -> "${bytes} B"
         }
+    }
+
+    private fun showReadingRecordManager() {
+        val pageSize = 12
+        var page = 0
+        var scope = "APP_ALL"
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 12, 24, 0)
+        }
+        val scopeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, 12)
+        }
+        val status = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 0, 0, 12)
+        }
+        val listBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val pagerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 12, 0, 0)
+        }
+        content.addView(scopeRow)
+        content.addView(status)
+        content.addView(listBox)
+        content.addView(pagerRow)
+
+        lateinit var dialog: AlertDialog
+
+        fun loadPage(): Pair<Int, List<UiReadingRecord>> {
+            return when (scope) {
+                "APP_NEO" -> {
+                    val total = ReadingDataStore.countDailyBooks(this, "NEO")
+                    total to ReadingDataStore.queryDailyBooksPage(this, "NEO", pageSize, page * pageSize).map { it.toUiRecord("APP") }
+                }
+                "APP_WEREAD" -> {
+                    val total = ReadingDataStore.countDailyBooks(this, "WEREAD")
+                    total to ReadingDataStore.queryDailyBooksPage(this, "WEREAD", pageSize, page * pageSize).map { it.toUiRecord("APP") }
+                }
+                "LOCAL_NEO" -> queryLocalNeoRecordsPage(pageSize, page * pageSize)
+                else -> {
+                    val total = ReadingDataStore.countDailyBooks(this, null)
+                    total to ReadingDataStore.queryDailyBooksPage(this, null, pageSize, page * pageSize).map { it.toUiRecord("APP") }
+                }
+            }
+        }
+
+        fun renderScopeButton(button: Button, selected: Boolean) {
+            button.setTextColor(if (selected) Color.WHITE else Color.BLACK)
+            button.setBackgroundColor(if (selected) Color.BLACK else Color.TRANSPARENT)
+        }
+
+        fun refresh() {
+            val (total, records) = loadPage()
+            val maxPage = ((total - 1).coerceAtLeast(0)) / pageSize
+            if (page > maxPage) {
+                page = maxPage
+                refresh()
+                return
+            }
+            status.text = when (scope) {
+                "LOCAL_NEO" -> "本地 Neo 原始记录：第 ${page + 1}/${maxPage + 1} 页，共 $total 条。删除会尝试调用系统 Provider；部分设备可能不允许。"
+                else -> "App 自己库：第 ${page + 1}/${maxPage + 1} 页，共 $total 条。只删除本 App 落库记录，不影响微信线上服务。"
+            }
+            listBox.removeAllViews()
+            if (records.isEmpty()) {
+                listBox.addView(TextView(this).apply {
+                    text = "暂无记录"
+                    textSize = 16f
+                    setTextColor(Color.DKGRAY)
+                    setPadding(0, 24, 0, 24)
+                })
+            } else {
+                records.forEach { record ->
+                    val row = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(0, 10, 0, 10)
+                    }
+                    row.addView(TextView(this).apply {
+                        text = readingRecordLabel(record)
+                        textSize = 14f
+                        setTextColor(Color.BLACK)
+                        maxLines = 4
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    })
+                    row.addView(Button(this).apply {
+                        text = "删除"
+                        setOnClickListener {
+                            confirmDeleteReadingRecord(record) {
+                                refresh()
+                            }
+                        }
+                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    listBox.addView(row)
+                    listBox.addView(View(this).apply {
+                        setBackgroundColor(Color.LTGRAY)
+                        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+                    })
+                }
+            }
+            pagerRow.removeAllViews()
+            pagerRow.addView(Button(this).apply {
+                text = "上一页"
+                isEnabled = page > 0
+                setOnClickListener {
+                    page = (page - 1).coerceAtLeast(0)
+                    refresh()
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(0, 0, 12, 0) })
+            pagerRow.addView(Button(this).apply {
+                text = "下一页"
+                isEnabled = page < maxPage
+                setOnClickListener {
+                    page += 1
+                    refresh()
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+
+        val scopes = listOf(
+            "APP_ALL" to "App库",
+            "APP_NEO" to "App-本地",
+            "APP_WEREAD" to "App-微信",
+            "LOCAL_NEO" to "Neo原始"
+        )
+        scopes.forEach { (key, label) ->
+            scopeRow.addView(Button(this).apply {
+                text = label
+                setOnClickListener {
+                    scope = key
+                    page = 0
+                    for (i in 0 until scopeRow.childCount) {
+                        val child = scopeRow.getChildAt(i)
+                        if (child is Button) renderScopeButton(child, scopes.getOrNull(i)?.first == scope)
+                    }
+                    refresh()
+                }
+                renderScopeButton(this, key == scope)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(0, 0, 6, 0) })
+        }
+
+        dialog = AlertDialog.Builder(this)
+            .setTitle("管理阅读记录")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton("关闭", null)
+            .create()
+        dialog.setOnShowListener { refresh() }
+        dialog.show()
+    }
+
+    private fun ReadingDataStore.DailyBookPageRecord.toUiRecord(scope: String): UiReadingRecord {
+        return UiReadingRecord(scope, date, source, bookKey, title, author, durationMs, progress, status, confidence)
+    }
+
+    private fun queryLocalNeoRecordsPage(limit: Int, offset: Int): Pair<Int, List<UiReadingRecord>> {
+        return runCatching {
+            val records = mutableListOf<UiReadingRecord>()
+            var total = 0
+            val projection = arrayOf("path", "eventTime", "durationTime")
+            contentResolver.query(
+                statsUri,
+                projection,
+                "durationTime IS NOT NULL AND durationTime != '' AND durationTime != '0'",
+                null,
+                "eventTime DESC"
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val path = c.getString(0).orEmpty()
+                    val eventTime = c.getString(1).orEmpty()
+                    val duration = c.getString(2)?.toLongOrNull() ?: 0L
+                    if (duration <= 0L) continue
+                    if (total in offset until offset + limit) {
+                        records.add(
+                            UiReadingRecord(
+                                scope = "LOCAL_NEO",
+                                date = formatYmd(eventTime.toLongOrNull() ?: 0L),
+                                source = "NEO_LOCAL",
+                                bookKey = path,
+                                title = File(path).name.ifBlank { path.takeLast(40) },
+                                author = null,
+                                durationMs = duration,
+                                progress = null,
+                                status = 1,
+                                confidence = eventTime
+                            )
+                        )
+                    }
+                    total += 1
+                }
+            }
+            total to records
+        }.getOrElse {
+            AutoRefreshLog.e(this, "query local Neo records page failed", it)
+            0 to emptyList()
+        }
+    }
+
+    private fun confirmDeleteReadingRecord(record: UiReadingRecord, onDeleted: () -> Unit) {
+        AlertDialog.Builder(this)
+            .setTitle("删除这条记录？")
+            .setMessage(readingRecordLabel(record))
+            .setNegativeButton("取消", null)
+            .setPositiveButton("删除") { _, _ ->
+                val ok = if (record.scope == "LOCAL_NEO") {
+                    deleteLocalNeoRecord(record)
+                } else {
+                    ReadingDataStore.deleteDailyBook(this, record.date, record.source, record.bookKey)
+                }
+                val msg = if (ok) "已删除记录：${record.title}" else "删除失败：当前来源可能不支持删除，或记录已不存在。"
+                statusText.text = msg
+                appendUiDebug("delete reading record ok=$ok scope=${record.scope} source=${record.source} date=${record.date} title=${record.title.take(80)}")
+                writeDebugLog("reading_record_deleted")
+                onDeleted()
+            }
+            .show()
+    }
+
+    private fun deleteLocalNeoRecord(record: UiReadingRecord): Boolean {
+        return runCatching {
+            val deleted = contentResolver.delete(
+                statsUri,
+                "path = ? AND eventTime = ? AND durationTime = ?",
+                arrayOf(record.bookKey, record.confidence, record.durationMs.toString())
+            )
+            AutoRefreshLog.i(this, "delete local Neo record path=${record.bookKey.take(120)} event=${record.confidence} duration=${record.durationMs} deleted=$deleted")
+            deleted > 0
+        }.getOrElse {
+            AutoRefreshLog.e(this, "delete local Neo record failed path=${record.bookKey.take(120)}", it)
+            false
+        }
+    }
+
+    private fun readingRecordLabel(record: UiReadingRecord): String {
+        val source = when (record.source) {
+            "NEO" -> "App库/本地"
+            "WEREAD" -> "App库/微信"
+            "NEO_LOCAL" -> "Neo原始"
+            else -> record.source
+        }
+        val status = when (record.status) {
+            0 -> "未读"
+            2 -> "读完"
+            else -> "在读"
+        }
+        val author = record.author?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+        val progress = record.progress?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+        return "${record.date} [$source] ${record.title}$author\n${formatReadingRecordDuration(record.durationMs)} · $status$progress\n${record.bookKey.take(120)}"
+    }
+
+    private fun formatReadingRecordDuration(ms: Long): String {
+        val minutes = ((ms + 59_999L) / 60_000L).coerceAtLeast(1L)
+        val h = minutes / 60
+        val m = minutes % 60
+        return if (h > 0) "${h}h${m}m" else "${m}m"
+    }
+
+    private fun formatYmd(ms: Long): String {
+        return if (ms > 0L) SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(ms)) else "-"
     }
 
     private fun testWeReadConnection() {
@@ -2879,6 +3276,14 @@ class MainActivity : ComponentActivity() {
             1243 -> "READING_MENU"
             else -> "RECEIPT"
         }
+        val calendarTemplate = when (calendarTemplateGroup.checkedRadioButtonId) {
+            1232 -> "ROUNDED_CARD"
+            else -> "CLASSIC"
+        }
+        val calendarFeatureBookRule = when (calendarFeatureBookRuleGroup.checkedRadioButtonId) {
+            1234 -> "LATEST"
+            else -> "LONGEST"
+        }
         val calendarStackOrder = when (calendarStackOrderGroup.checkedRadioButtonId) {
             1222 -> "SHORTEST_TOP"
             1223 -> "LATEST_TOP"
@@ -2955,7 +3360,7 @@ class MainActivity : ComponentActivity() {
         }
         val titleFont = fontSpec(titleFontSpinner.selectedItem?.toString() ?: "SERIF_BOLD")
         val bodyFont = fontSpec(bodyFontSpinner.selectedItem?.toString() ?: "MONO")
-        return Settings(includeUnread, showChart, showProgressStatus, showAuthor, showBookDuration, minDurationMinutes, topN, weekStart, weekEnd, periodMode, readingFilterMode, sourceMode, wallpaperMode, statsTemplate, calendarStackOrder, coverFitMode, progressMode, timeUnit, receiptTitle, receiptTitleSize, receiptBodySize, serialNumberMode, serialNumberCustom, serialNumberSize, booxDevicePreset, customWallpaperWidth, customWallpaperHeight, footerMode, barcodeWidthScale, barcodeGapMode, noteText, bookNoteMode, footerNoteSource, footerShowBookTitleCheck.isChecked, excerptSourceMode, chartStyleMode, showPeakLabel, yAxisMode, yAxisFixedMaxMinutes, titleFont, bodyFont)
+        return Settings(includeUnread, showChart, showProgressStatus, showAuthor, showBookDuration, minDurationMinutes, topN, weekStart, weekEnd, periodMode, readingFilterMode, sourceMode, wallpaperMode, statsTemplate, calendarTemplate, calendarFeatureBookRule, calendarStackOrder, coverFitMode, progressMode, timeUnit, receiptTitle, receiptTitleSize, receiptBodySize, serialNumberMode, serialNumberCustom, serialNumberSize, booxDevicePreset, customWallpaperWidth, customWallpaperHeight, footerMode, barcodeWidthScale, barcodeGapMode, noteText, bookNoteMode, footerNoteSource, footerShowBookTitleCheck.isChecked, excerptSourceMode, chartStyleMode, showPeakLabel, yAxisMode, yAxisFixedMaxMinutes, titleFont, bodyFont)
     }
 
     private fun saveSettings(settings: Settings) {
@@ -2975,6 +3380,8 @@ class MainActivity : ComponentActivity() {
             .putString("source_mode", settings.sourceMode.name)
             .putString("wallpaper_mode", settings.wallpaperMode)
             .putString("stats_template", settings.statsTemplate)
+            .putString("calendar_template", settings.calendarTemplate)
+            .putString("calendar_feature_book_rule", settings.calendarFeatureBookRule)
             .putString("calendar_stack_order", settings.calendarStackOrder)
             .putString("cover_fit_mode", settings.coverFitMode)
             .putString("progress_mode", settings.progressMode)
@@ -3230,6 +3637,8 @@ class MainActivity : ComponentActivity() {
                     .append(", sourceMode=").append(s.sourceMode.name)
                     .append(", wallpaperMode=").append(s.wallpaperMode)
                     .append(", statsTemplate=").append(s.statsTemplate)
+                    .append(", calendarTemplate=").append(s.calendarTemplate)
+                    .append(", calendarFeatureBookRule=").append(s.calendarFeatureBookRule)
                     .append(", coverFitMode=").append(s.coverFitMode)
                     .append(", progressMode=").append(s.progressMode)
                     .append(", timeUnit=").append(s.timeUnit)

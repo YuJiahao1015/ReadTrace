@@ -15,6 +15,7 @@ object WallpaperFileStore {
     private const val FILE_NAME = "neoreader_wallpaper.png"
     private const val DIR_NAME = "NeoReader"
     private const val MIME_TYPE = "image/png"
+    const val PREF_KEY_CUSTOM_TREE_URI = "wallpaper_save_tree_uri"
 
     data class SaveResult(
         val ok: Boolean,
@@ -26,6 +27,17 @@ object WallpaperFileStore {
 
     fun save(context: Context, bitmap: Bitmap, reason: String = "manual"): SaveResult {
         val errors = mutableListOf<String>()
+        val customTreeUri = context.getSharedPreferences(AutoRefreshConfig.PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PREF_KEY_CUSTOM_TREE_URI, "")
+            .orEmpty()
+            .trim()
+        if (customTreeUri.isNotBlank()) {
+            runCatching {
+                return withDevicePipeline(context, bitmap, saveToCustomTree(context, bitmap, customTreeUri), reason)
+            }.onFailure {
+                errors += "CustomTree ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}"
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching { return withDevicePipeline(context, bitmap, saveWithMediaStore(context, bitmap), reason) }
                 .onFailure { errors += "MediaStore ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
@@ -40,6 +52,52 @@ object WallpaperFileStore {
             detail = errors.joinToString("；").ifBlank { "未知保存错误" },
             fallback = true
         )
+    }
+
+    private fun saveToCustomTree(context: Context, bitmap: Bitmap, treeUriText: String): SaveResult {
+        val treeUri = Uri.parse(treeUriText)
+        val resolver = context.contentResolver
+        val parentUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+        )
+        findExistingTreeChild(context, treeUri, FILE_NAME)?.let { existing ->
+            runCatching { android.provider.DocumentsContract.deleteDocument(resolver, existing) }
+        }
+        val uri = android.provider.DocumentsContract.createDocument(resolver, parentUri, MIME_TYPE, FILE_NAME)
+            ?: error("createDocument returned null")
+        resolver.openOutputStream(uri, "w")?.use { out ->
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) error("bitmap compress failed")
+        } ?: error("openOutputStream returned null")
+        return SaveResult(
+            ok = true,
+            path = "自定义目录/$FILE_NAME",
+            detail = "saved=custom_tree uri=$uri",
+            contentUri = uri.toString()
+        )
+    }
+
+    private fun findExistingTreeChild(context: Context, treeUri: Uri, displayName: String): Uri? {
+        val resolver = context.contentResolver
+        val treeDocId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+        val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocId)
+        resolver.query(
+            childrenUri,
+            arrayOf(
+                android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME
+            ),
+            null,
+            null,
+            null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                if (c.getString(1) == displayName) {
+                    return android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, c.getString(0))
+                }
+            }
+        }
+        return null
     }
 
     private fun withDevicePipeline(
