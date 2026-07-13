@@ -37,7 +37,7 @@ object SafeLogStore {
         bytes: ByteArray
     ): WriteResult {
         val errors = mutableListOf<String>()
-        if (DevicePlatform.isBooxDevice()) {
+        if (DeviceCompatibilityPolicy.exportPrefersDirectPublicDownload()) {
             runCatching { return writePublicDownload(fileName, bytes, append = false) }
                 .onFailure { errors += "BooxPublicDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
         }
@@ -45,7 +45,7 @@ object SafeLogStore {
             runCatching { return writeMediaStoreDownload(context, fileName, mimeType, bytes) }
                 .onFailure { errors += "MediaStoreDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
         }
-        if (!DevicePlatform.isBooxDevice()) {
+        if (!DeviceCompatibilityPolicy.exportPrefersDirectPublicDownload()) {
             runCatching { return writePublicDownload(fileName, bytes, append = false) }
                 .onFailure { errors += "PublicDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
         }
@@ -55,19 +55,7 @@ object SafeLogStore {
     }
 
     fun candidates(context: Context, fileName: String): List<File> {
-        val appCandidates = listOfNotNull(
-            context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, fileName) },
-            File(context.filesDir, fileName)
-        )
-        val publicCandidates = listOf(
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
-        )
-        val ordered = if (DevicePlatform.isBooxDevice()) {
-            publicCandidates + appCandidates
-        } else {
-            appCandidates + publicCandidates
-        }
-        return ordered.distinctBy { it.absolutePath }
+        return DeviceCompatibilityPolicy.logCandidates(context, fileName)
     }
 
     private fun writeRuntimeBytes(
@@ -77,7 +65,7 @@ object SafeLogStore {
         append: Boolean
     ): WriteResult {
         val errors = mutableListOf<String>()
-        if (DevicePlatform.isBooxDevice()) {
+        if (DeviceCompatibilityPolicy.runtimeLogsPreferPublicDownload()) {
             runCatching { return writePublicDownload(fileName, bytes, append) }
                 .onFailure { errors += "BooxPublicDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
         }

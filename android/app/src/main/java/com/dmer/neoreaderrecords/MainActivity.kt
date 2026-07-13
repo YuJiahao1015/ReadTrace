@@ -247,43 +247,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkAllFilesAccessPermission() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            if (!android.os.Environment.isExternalStorageManager()) {
-                openAllFilesAccessSettings()
-            }
+        if (StoragePermissionHelper.shouldRequestAllFilesAccess()) {
+            openAllFilesAccessSettings()
         }
     }
 
     private fun openAllFilesAccessSettings() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            try {
-                val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                intent.data = Uri.parse("package:$packageName")
-                startActivity(intent)
-                DebugEventLog.i(this, "open permission settings appAllFiles")
-            } catch (e: Exception) {
-                val intent = Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                startActivity(intent)
-                DebugEventLog.i(this, "open permission settings allFiles fallback=${e.javaClass.simpleName}:${e.message.orEmpty().take(80)}")
-            }
-        } else {
-            DebugEventLog.i(this, "open permission settings skipped sdk=${android.os.Build.VERSION.SDK_INT}")
-        }
+        StoragePermissionHelper.openAllFilesAccessSettings(this)
     }
 
     private fun storagePermissionSummary(): String {
-        val allFiles = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            android.os.Environment.isExternalStorageManager()
-        } else {
-            true
-        }
-        val persisted = contentResolver.persistedUriPermissions.size
-        return "全部文件访问=$allFiles，SAF授权=$persisted，公共目录不可见时请点下方按钮授权后再导出诊断包。"
+        return StoragePermissionHelper.summary(this)
     }
 
     private fun isCompactPhoneUi(): Boolean {
-        val widthDp = resources.configuration.screenWidthDp
-        return DevicePlatform.isHisenseDevice() || (widthDp in 1..420)
+        return DeviceCompatibilityPolicy.isCompactPhoneUi(this)
     }
 
     private fun compactSettingLabel(label: String): String {
