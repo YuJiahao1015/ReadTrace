@@ -2,7 +2,6 @@ package com.dmer.neoreaderrecords
 
 import android.content.Context
 import android.os.Build
-import android.os.Environment
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -84,19 +83,7 @@ object DiagnosticPackageExporter {
     }
 
     private fun wallpaperCandidates(context: Context): List<File> {
-        val appCandidates = listOfNotNull(
-            context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)?.let { File(it, "NeoReader/neoreader_wallpaper.png") },
-            File(context.filesDir, "NeoReader/neoreader_wallpaper.png")
-        )
-        val publicCandidates = listOf(
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "NeoReader/neoreader_wallpaper.png")
-        )
-        val ordered = if (DevicePlatform.isBooxDevice()) {
-            publicCandidates + appCandidates
-        } else {
-            appCandidates
-        }
-        return ordered.distinctBy { it.absolutePath }
+        return DeviceCompatibilityPolicy.wallpaperCandidates(context)
     }
 
     private fun addFirstExisting(zip: ZipOutputStream, entryName: String, files: List<File>) {
