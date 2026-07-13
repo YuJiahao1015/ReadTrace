@@ -16,7 +16,7 @@ object DiagnosticPackageExporter {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val name = "ReadTrace_logs_$stamp.zip"
         val bytes = buildZip(context)
-        return SafeLogStore.writeBytes(context, name, "application/zip", bytes, append = false)
+        return SafeLogStore.exportBytes(context, name, "application/zip", bytes)
     }
 
     private fun buildZip(context: Context): ByteArray {
