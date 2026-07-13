@@ -2551,7 +2551,21 @@ object AutoWallpaperGenerator {
             ?: return null
         val excerpt = runCatching {
             val keys = listOf(selected.first.path, selected.first.title).filter { it.isNotBlank() }
-            fetchLatestLocalAnnotation(context, keys)?.text?.trim()?.takeIf { it.isNotBlank() }
+            val book = BookItem(
+                bookId = selected.first.path.takeIf { it.isNotBlank() && !it.startsWith("/") },
+                title = selected.first.title,
+                author = selected.first.author,
+                progress = null,
+                status = selected.first.status,
+                localKeys = keys
+            )
+            loadAutoBookNote(
+                context = context,
+                apiKey = WeReadClient.loadApiKey(context),
+                book = book,
+                fetchWeReadExcerpt = s.sourceMode == "WEREAD" || s.sourceMode == "MIXED",
+                s = s
+            ).trim().takeIf { it.isNotBlank() }
         }.getOrNull()
         return CalendarFeaturedBook(selected.first, selected.second, selected.third, excerpt)
     }
@@ -2580,9 +2594,24 @@ object AutoWallpaperGenerator {
         canvas.drawRoundRect(area, radius, radius, stroke)
 
         val pad = (h * 0.13f).coerceIn(12f, 30f)
-        val coverH = (h - pad * 2f).coerceAtLeast(1f)
-        val coverW = (coverH * 0.66f).coerceAtMost(w * 0.22f)
-        val cover = RectF(area.left + pad, area.top + pad, area.left + pad + coverW, area.top + pad + coverH)
+        val maxCoverH = (h - pad * 2f).coerceAtLeast(1f)
+        val coverRatio = 0.68f
+        val maxCoverW = (w * if (compact) 0.23f else 0.27f).coerceAtLeast(72f)
+        var coverW = maxCoverW
+        var coverH = coverW / coverRatio
+        if (coverH > maxCoverH) {
+            coverH = maxCoverH
+            coverW = coverH * coverRatio
+        }
+        val heightCap = h * if (compact) 0.72f else 0.68f
+        if (coverH > heightCap) {
+            coverH = heightCap
+            coverW = coverH * coverRatio
+        }
+        coverW = coverW.coerceAtMost(w * 0.30f)
+        coverH = coverW / coverRatio
+        val coverTop = area.top + (h - coverH) / 2f
+        val cover = RectF(area.left + pad, coverTop, area.left + pad + coverW, coverTop + coverH)
         if (featured.item.bitmap != null) {
             drawRoundedFittedBitmap(canvas, featured.item.bitmap, cover, cover.width() * 0.12f)
         } else {
@@ -2625,9 +2654,18 @@ object AutoWallpaperGenerator {
         y += metaPaint.textSize * 1.10f
 
         val excerpt = featured.excerpt?.trim().orEmpty()
-        if (!compact && allowExcerpt && excerpt.isNotBlank() && y + excerptPaint.textSize < area.bottom - pad * 0.45f) {
-            val maxLines = if (area.height() > coverH * 1.15f) 2 else 1
-            drawMultiLineText(canvas, "摘：$excerpt", textLeft, y, excerptPaint, textW, excerptPaint.textSize * 1.34f, maxLines)
+        if (allowExcerpt && excerpt.isNotBlank()) {
+            val availableTextH = area.bottom - pad * 0.55f - y
+            val lineH = excerptPaint.textSize * 1.34f
+            val maxLines = when {
+                availableTextH >= lineH * 3.1f -> 3
+                availableTextH >= lineH * 2.05f -> 2
+                availableTextH >= lineH * 1.05f -> 1
+                else -> 0
+            }
+            if (maxLines > 0) {
+                drawMultiLineText(canvas, "摘：$excerpt", textLeft, y, excerptPaint, textW, lineH, maxLines)
+            }
         }
     }
 
