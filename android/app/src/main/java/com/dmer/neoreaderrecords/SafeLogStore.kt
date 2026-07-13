@@ -22,39 +22,62 @@ object SafeLogStore {
 
     fun writeText(context: Context, fileName: String, text: String): WriteResult {
         val bytes = text.toByteArray(Charsets.UTF_8)
-        return writeBytes(context, fileName, "text/plain", bytes, append = false)
+        return writeRuntimeBytes(context, fileName, bytes, append = false)
     }
 
     fun appendText(context: Context, fileName: String, text: String): WriteResult {
         val bytes = text.toByteArray(Charsets.UTF_8)
-        return writeBytes(context, fileName, "text/plain", bytes, append = true)
+        return writeRuntimeBytes(context, fileName, bytes, append = true)
     }
 
-    fun writeBytes(
+    fun exportBytes(
         context: Context,
         fileName: String,
         mimeType: String,
-        bytes: ByteArray,
-        append: Boolean = false
+        bytes: ByteArray
     ): WriteResult {
         val errors = mutableListOf<String>()
-        runCatching { return writePublicDownload(fileName, bytes, append) }
+        runCatching { return writePublicDownload(fileName, bytes, append = false) }
             .onFailure { errors += "PublicDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !append) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching { return writeMediaStoreDownload(context, fileName, mimeType, bytes) }
                 .onFailure { errors += "MediaStoreDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
         }
-        runCatching { return writeAppDownload(context, fileName, bytes, append, errors.joinToString("；")) }
+        runCatching { return writeAppDownload(context, fileName, bytes, append = false, errors.joinToString("；")) }
             .onFailure { errors += "AppDownload ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
-        return WriteResult(false, "", errors.joinToString("；").ifBlank { "未知日志写入错误" }, fallback = true)
+        return WriteResult(false, "", errors.joinToString("；").ifBlank { "未知导出写入错误" }, fallback = true)
     }
 
     fun candidates(context: Context, fileName: String): List<File> {
         return listOfNotNull(
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName),
             context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, fileName) },
-            File(context.filesDir, fileName)
+            File(context.filesDir, fileName),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
         ).distinctBy { it.absolutePath }
+    }
+
+    private fun writeRuntimeBytes(
+        context: Context,
+        fileName: String,
+        bytes: ByteArray,
+        append: Boolean
+    ): WriteResult {
+        val errors = mutableListOf<String>()
+        runCatching {
+            val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+            if (!dir.exists() && !dir.mkdirs()) error("mkdirs failed: ${dir.absolutePath}")
+            val file = File(dir, fileName)
+            writeFile(file, bytes, append)
+            return WriteResult(true, file.absolutePath, "saved=app_log")
+        }.onFailure { errors += "AppLog ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
+
+        runCatching {
+            val file = File(context.filesDir, fileName)
+            writeFile(file, bytes, append)
+            return WriteResult(true, file.absolutePath, "saved=files_log；appLogFailed=${errors.joinToString("；")}", fallback = true)
+        }.onFailure { errors += "FilesLog ${it.javaClass.simpleName}:${it.message.orEmpty().take(120)}" }
+
+        return WriteResult(false, "", errors.joinToString("；").ifBlank { "未知日志写入错误" }, fallback = true)
     }
 
     private fun writePublicDownload(fileName: String, bytes: ByteArray, append: Boolean): WriteResult {
