@@ -44,7 +44,6 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatWriter
 import com.google.zxing.common.BitMatrix
 import java.io.File
-import java.io.FileOutputStream
 import java.io.FileWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -111,6 +110,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoMinIntervalInput: EditText
     private lateinit var autoModeHintText: TextView
     private lateinit var autoStateText: TextView
+    private lateinit var autoExactAlarmButton: Button
     private lateinit var updateStatusText: TextView
     private lateinit var wereadApiKeyInput: EditText
     private lateinit var wereadStatsModeGroup: RadioGroup
@@ -173,7 +173,6 @@ class MainActivity : ComponentActivity() {
         val path: String,
         val title: String,
         val author: String,
-        val lastAccessMs: Long,
         val hasCoverHint: Boolean
     )
     private data class CalendarDayStat(
@@ -260,6 +259,12 @@ class MainActivity : ComponentActivity() {
         if (!isInitializingUi) {
             validateFontTreePermission()
             reloadFontsFromSources()
+            if (
+                AutoRefreshConfig.isEnabled(this) &&
+                AutoRefreshConfig.mode(this) == AutoRefreshConfig.MODE_DAILY
+            ) {
+                AutoRefreshScheduler.reschedule(this)
+            }
             updateAutoRuntimeState()
             updateReleaseStatusFromCache()
             checkForUpdatesIfNeeded(force = false)
@@ -1252,6 +1257,12 @@ class MainActivity : ComponentActivity() {
             setPadding(0, 0, 0, 16)
             root.addView(this)
         }
+        autoExactAlarmButton = Button(this).apply {
+            text = "允许精确定时"
+            isAllCaps = false
+            setOnClickListener { openExactAlarmSettings() }
+            root.addView(this)
+        }
         val autoWarningText = addHint("提示：熄屏触发会增加唤醒次数与耗电；NeoReader 常在退出当前书籍/会话落库后才更新元数据，所以可能出现“本次锁屏仍是旧封面、下次锁屏生效”的现象。")
 
         addSectionTitle("微信读书", "配置 API Key，支持手动生成与解锁预热刷新")
@@ -1400,6 +1411,11 @@ class MainActivity : ComponentActivity() {
             autoMinIntervalSlider.visibility = if (autoEnabled && autoModeGroup.checkedRadioButtonId == 8002) View.VISIBLE else View.GONE
             autoModeHintText.visibility = if (autoEnabled) View.VISIBLE else View.GONE
             autoStateText.visibility = if (autoEnabled) View.VISIBLE else View.GONE
+            autoExactAlarmButton.visibility = if (
+                autoEnabled &&
+                autoModeGroup.checkedRadioButtonId == 8001 &&
+                !AutoRefreshScheduler.canScheduleExact(this)
+            ) View.VISIBLE else View.GONE
             autoWarningText.visibility = if (autoEnabled) View.VISIBLE else View.GONE
         }
 
@@ -1724,6 +1740,7 @@ class MainActivity : ComponentActivity() {
             "screen_on_prewarm" -> "亮屏预热"
             "user_present_prewarm" -> "解锁预热"
             "book_content_changed" -> "内容变化"
+            "reading_stats_changed" -> "阅读统计变化"
             "daily_alarm" -> "每日定时"
             "" -> "暂无"
             else -> lastReasonRaw
@@ -1733,14 +1750,36 @@ class MainActivity : ComponentActivity() {
         } else {
             "暂无"
         }
+        val exactAllowed = AutoRefreshScheduler.canScheduleExact(this)
         val runtimeHint = if (!enabled) {
             "自动已关闭"
         } else if (mode == AutoRefreshConfig.MODE_SCREEN_OFF) {
             "熄屏监听应运行（前台服务）"
+        } else if (exactAllowed) {
+            "按每日精确定时运行（$dailyTime）"
         } else {
-            "按每日定时运行（$dailyTime）"
+            "按每日非精确定时运行（$dailyTime，系统可能延后）"
+        }
+        if (::autoExactAlarmButton.isInitialized) {
+            autoExactAlarmButton.visibility = if (
+                enabled && mode == AutoRefreshConfig.MODE_DAILY && !exactAllowed
+            ) View.VISIBLE else View.GONE
         }
         autoStateText.text = "自动状态：$runtimeHint\n最近触发：$lastTime（$lastReason）\n当前参数：模式=$mode，定时=$dailyTime，熄屏间隔=${minInterval}分钟"
+    }
+
+    private fun openExactAlarmSettings() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+        val packageUri = Uri.parse("package:$packageName")
+        runCatching {
+            startActivity(
+                Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, packageUri)
+            )
+        }.onFailure {
+            startActivity(
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+            )
+        }
     }
 
     private fun updateReleaseStatusFromCache() {
@@ -2243,10 +2282,9 @@ class MainActivity : ComponentActivity() {
             val start = startOfDayMs(now - 29L * 24L * 60L * 60L * 1000L)
             val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
             val metaByPath = linkedMapOf<String, CalendarMetaBook>()
-            val metaByName = linkedMapOf<String, CalendarMetaBook>()
             contentResolver.query(
                 metadataUri,
-                arrayOf("nativeAbsolutePath", "title", "authors", "lastAccess", "coverUrl", "extraInfo", "downloadInfo"),
+                arrayOf("nativeAbsolutePath", "title", "authors", "coverUrl", "extraInfo", "downloadInfo"),
                 null,
                 null,
                 null
@@ -2261,11 +2299,9 @@ class MainActivity : ComponentActivity() {
                     if (path.isBlank()) continue
                     val title = col("title").ifBlank { File(path).nameWithoutExtension }
                     val author = col("authors")
-                    val lastAccess = normalizeEpochMs(col("lastAccess").toLongOrNull() ?: 0L)
                     val coverHint = listOf("coverUrl", "extraInfo", "downloadInfo").any { col(it).isNotBlank() } || hasExtractedCoverCache(path)
-                    val book = CalendarMetaBook(path, title, author, lastAccess, coverHint)
+                    val book = CalendarMetaBook(path, title, author, coverHint)
                     metaByPath[path] = book
-                    metaByName[File(path).name] = book
                 }
             }
 
@@ -2277,8 +2313,7 @@ class MainActivity : ComponentActivity() {
             var statsRowsWithPath = 0
             var exactMatches = 0
             var nameMatches = 0
-            var timeMatches = 0
-            var unmatched = 0
+            val rawEvents = mutableListOf<ReadingEventAttribution.Event>()
             contentResolver.query(
                 statsUri,
                 arrayOf("path", "eventTime", "durationTime"),
@@ -2300,29 +2335,43 @@ class MainActivity : ComponentActivity() {
                     val dayStart = startOfDayMs(eventMs)
                     val day = days.getOrPut(dayStart) { CalendarDayStat() }
                     day.events += 1
-                    day.durationMs += dur
-                    val matchedBook = if (path.isNotBlank()) {
+                    if (path.isNotBlank()) {
                         statsRowsWithPath += 1
                         day.withPath += 1
-                        metaByPath[path]?.also { exactMatches += 1 }
-                            ?: metaByName[File(path).name]?.also { nameMatches += 1 }
                     } else {
                         day.orphan += 1
-                        null
-                    } ?: findNearestCalendarBook(metaByPath.values, eventMs)?.also {
-                        timeMatches += 1
                     }
-
-                    if (matchedBook == null) {
-                        day.unmatched += 1
-                        unmatched += 1
-                    } else {
-                        day.matched += 1
-                        day.books[matchedBook.title] = (day.books[matchedBook.title] ?: 0L) + dur
-                        if (matchedBook.hasCoverHint) day.coverBooks.add(matchedBook.title)
-                    }
+                    rawEvents += ReadingEventAttribution.Event(path, eventMs, dur)
                 }
             }
+
+            val attribution = ReadingEventAttribution.attribute(
+                rawEvents,
+                metaByPath.values.map { ReadingEventAttribution.Book(it.path, true) }
+            )
+            attribution.matches.forEach { match ->
+                val day = days.getOrPut(startOfDayMs(match.event.timestampMs)) { CalendarDayStat() }
+                val matchedBook = metaByPath[match.book.path] ?: return@forEach
+                day.matched += 1
+                day.durationMs += match.event.durationMs
+                day.books[matchedBook.title] =
+                    (day.books[matchedBook.title] ?: 0L) + match.event.durationMs
+                if (matchedBook.hasCoverHint) day.coverBooks.add(matchedBook.title)
+                when (match.confidence) {
+                    ReadingEventAttribution.Confidence.EXACT_PATH -> exactMatches += 1
+                    ReadingEventAttribution.Confidence.UNIQUE_FILE_NAME -> nameMatches += 1
+                }
+            }
+            attribution.unmatched.forEach { event ->
+                val day = days.getOrPut(startOfDayMs(event.event.timestampMs)) { CalendarDayStat() }
+                day.unmatched += 1
+            }
+            val unmatchedReasons = attribution.unmatched
+                .groupingBy { it.reason }
+                .eachCount()
+                .entries
+                .joinToString(",") { "${it.key}=${it.value}" }
+                .ifBlank { "none" }
 
             val out = StringBuilder()
             out.append("range=").append(dateFmt.format(Date(start))).append("~").append(dateFmt.format(Date(end))).append('\n')
@@ -2331,8 +2380,8 @@ class MainActivity : ComponentActivity() {
                 .append(", metadata=").append(metaByPath.size)
                 .append(", exactMatches=").append(exactMatches)
                 .append(", nameMatches=").append(nameMatches)
-                .append(", timeMatches=").append(timeMatches)
-                .append(", unmatched=").append(unmatched)
+                .append(", unmatched=").append(attribution.unmatched.size)
+                .append(", unmatchedReasons=").append(unmatchedReasons)
                 .append('\n')
             days.entries.forEach { (dayStart, stat) ->
                 if (stat.events == 0 && stat.books.isEmpty()) return@forEach
@@ -2356,21 +2405,6 @@ class MainActivity : ComponentActivity() {
         }.onFailure {
             localCalendarProbeReport = "error=${it.javaClass.simpleName}:${it.message}"
         }
-    }
-
-    private fun findNearestCalendarBook(books: Collection<CalendarMetaBook>, eventMs: Long): CalendarMetaBook? {
-        val maxDelta = 12L * 60L * 60L * 1000L
-        var best: CalendarMetaBook? = null
-        var bestDelta = Long.MAX_VALUE
-        books.forEach { book ->
-            if (book.lastAccessMs <= 0L) return@forEach
-            val delta = kotlin.math.abs(book.lastAccessMs - eventMs)
-            if (delta < bestDelta) {
-                best = book
-                bestDelta = delta
-            }
-        }
-        return if (bestDelta <= maxDelta) best else null
     }
 
     private fun hasExtractedCoverCache(path: String): Boolean {
@@ -2678,18 +2712,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveBitmapToPictures(bitmap: Bitmap): String {
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "NeoReader")
-        if (!dir.exists()) dir.mkdirs()
-        val file = File(dir, "neoreader_wallpaper.png")
-        FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
-        runCatching {
-            android.media.MediaScannerConnection.scanFile(
-                this,
-                arrayOf(file.absolutePath),
-                arrayOf("image/png")
-            ) { _, _ -> }
-        }
-        return file.absolutePath
+        return WallpaperFileStore.save(this, bitmap)
     }
 
     private fun dumpTextTree(view: View, maxItems: Int = 80): String {
