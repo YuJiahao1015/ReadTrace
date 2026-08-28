@@ -4,7 +4,9 @@
 
 当前测试版本：[`pr-2-test.1`](https://github.com/YuJiahao1015/ReadTrace/releases/tag/pr-2-test.1)
 
-当前代码分支：[`fix/reading-accuracy-refresh-reliability`](https://github.com/YuJiahao1015/ReadTrace/tree/fix/reading-accuracy-refresh-reliability)
+当前发布分支：[`boox-reliability-test`](https://github.com/YuJiahao1015/ReadTrace/tree/boox-reliability-test)
+
+上游 PR 分支：[`fix/reading-accuracy-refresh-reliability`](https://github.com/YuJiahao1015/ReadTrace/tree/fix/reading-accuracy-refresh-reliability)
 
 上游合并请求：[`wberry9813/ReadTrace#2`](https://github.com/wberry9813/ReadTrace/pull/2)
 
