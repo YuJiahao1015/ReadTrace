@@ -1,5 +1,7 @@
 package com.dmer.neoreaderrecords
 
+import androidx.core.content.ContextCompat
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -29,6 +31,14 @@ class AutoRefreshReasonPolicyTest {
         assertTrue(AutoRefreshReasonPolicy.needsLocalSettleDelay("book_content_changed"))
         assertTrue(AutoRefreshReasonPolicy.needsLocalSettleDelay("reading_stats_changed"))
         assertFalse(AutoRefreshReasonPolicy.needsLocalSettleDelay("screen_off"))
+    }
+
+    @Test
+    fun screenStateReceiverIsExportedForSystemBroadcasts() {
+        assertEquals(
+            ContextCompat.RECEIVER_EXPORTED,
+            AutoRefreshReasonPolicy.screenStateReceiverFlags()
+        )
     }
 
     @Test

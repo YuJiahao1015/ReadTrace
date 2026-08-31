@@ -1,5 +1,7 @@
 package com.dmer.neoreaderrecords
 
+import androidx.core.content.ContextCompat
+
 internal object AutoRefreshReasonPolicy {
     const val LOCAL_WORK_NAME = "neoreader_local_auto_refresh"
     const val REMOTE_WORK_NAME = "neoreader_remote_auto_refresh"
@@ -17,6 +19,8 @@ internal object AutoRefreshReasonPolicy {
     fun needsLocalSettleDelay(reason: String): Boolean {
         return reason == "book_content_changed" || reason == "reading_stats_changed"
     }
+
+    fun screenStateReceiverFlags(): Int = ContextCompat.RECEIVER_EXPORTED
 
     fun shouldRefreshUnchangedCover(
         wallpaperMode: String,

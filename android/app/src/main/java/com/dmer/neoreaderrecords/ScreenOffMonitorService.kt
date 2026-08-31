@@ -60,7 +60,7 @@ class ScreenOffMonitorService : Service() {
             this,
             r,
             filter,
-            ContextCompat.RECEIVER_NOT_EXPORTED
+            AutoRefreshReasonPolicy.screenStateReceiverFlags()
         )
         receiver = r
 
